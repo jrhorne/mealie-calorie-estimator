@@ -5,6 +5,7 @@ import {
   computeIngredientHash,
   hasManualCalories,
   buildManualAckPatch,
+  shouldEstimate,
 } from "../services/estimator.js"
 import { perServingFromRecipeNutrition, tagsAreComplete, resolveAndMergeTags, estimateAndTag } from "../services/tagging.js"
 import { logger } from "../utils/logger.js"
@@ -27,6 +28,12 @@ function normalizeEventData(raw: Record<string, unknown>): EventRecipeData {
 async function processWebhook(slug: string): Promise<void> {
   try {
     const recipe = await getRecipe(slug)
+
+    if (!shouldEstimate(recipe)) {
+      logger.info({ slug }, "Recipe skipped (not tagged for estimation)")
+      return
+    }
+
     const householdId = getRecipeHouseholdId(recipe)
 
     const hash = computeIngredientHash(recipe)

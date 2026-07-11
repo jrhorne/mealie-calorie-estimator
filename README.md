@@ -111,6 +111,8 @@ It's recommended to install it next to your Mealie instance using docker-compose
 | `LLM_API_KEY` | — | API key for OpenAI-compatible endpoint |
 | `LLM_BASE_URL` | `https://api.mistral.ai/v1` | LLM API base URL |
 | `LLM_MODEL` | `mistral-small-latest` | Model name |
+| `ESTIMATE_STRATEGY` | `all` | Estimation strategy: `all` (estimate every recipe) or `tagged` (only estimate recipes with the `ESTIMATE_TAG` tag) |
+| `ESTIMATE_TAG` | `estimate` | Tag name to check when `ESTIMATE_STRATEGY=tagged` |
 | `PORT` | `8000` | Server port |
 | `LOG_LEVEL` | `info` | Pino log level |
 

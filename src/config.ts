@@ -54,6 +54,11 @@ export const config = {
     rateLimit: parseInt(process.env.LLM_RATE_LIMIT || "30", 10),
   },
 
+  estimate: {
+    strategy: (process.env.ESTIMATE_STRATEGY || "all") as "all" | "tagged",
+    tag: process.env.ESTIMATE_TAG || "estimate",
+  },
+
   cache: {
     dbPath: process.env.CACHE_DB_PATH || "data/cache.db",
   },
