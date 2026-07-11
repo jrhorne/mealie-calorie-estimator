@@ -3,6 +3,7 @@ import type {
   MealieRecipe, IngredientMatch, EstimateResult, NutritionPatch,
   NutrientSet, MealieNutrition,
 } from "../types.js"
+import { config } from "../config.js"
 import { convertToGrams } from "./unit-converter.js"
 import { lookupNutrients } from "./off-client.js"
 import { estimateGrams, estimateNutrients } from "./llm-estimator.js"
@@ -23,6 +24,12 @@ export function computeIngredientHash(recipe: MealieRecipe): string {
   parts.push(`servings:${recipe.recipeServings ?? ""}`)
   const hash = crypto.createHash("sha256").update(parts.join(",")).digest("hex")
   return hash
+}
+
+export function shouldEstimate(recipe: MealieRecipe): boolean {
+  if (config.estimate.strategy === "all") return true
+  const tagName = config.estimate.tag.toLowerCase()
+  return (recipe.tags || []).some(t => t.slug === tagName || t.name.toLowerCase() === tagName)
 }
 
 export function parseYield(recipeYield: string | null): number | null {

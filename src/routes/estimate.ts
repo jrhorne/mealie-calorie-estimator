@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify"
 import { getRecipe, getRecipeHouseholdId } from "../services/mealie-client.js"
-import { computeIngredientHash } from "../services/estimator.js"
+import { computeIngredientHash, shouldEstimate } from "../services/estimator.js"
 import { estimateAndTag } from "../services/tagging.js"
 import { logger } from "../utils/logger.js"
 
@@ -9,6 +9,12 @@ async function processEstimate(slug: string): Promise<void> {
     logger.info({ slug }, "On-demand estimation processing")
 
     const recipe = await getRecipe(slug)
+
+    if (!shouldEstimate(recipe)) {
+      logger.info({ slug }, "Recipe skipped (not tagged for estimation)")
+      return
+    }
+
     const householdId = getRecipeHouseholdId(recipe)
     const hash = computeIngredientHash(recipe)
     const { calories, tagSlugs } = await estimateAndTag(recipe, hash, householdId)
