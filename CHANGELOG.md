@@ -1,3 +1,9 @@
+## [1.8.0](https://github.com/timo-reymann/mealie-calorie-estimator/compare/v1.7.0...v1.8.0) (2026-07-11)
+
+### Features
+
+* add estimation strategy with opt-in tag-based filtering ([0e29922](https://github.com/timo-reymann/mealie-calorie-estimator/commit/0e2992234d520196be5fc37fd63d559e7f5d1661))
+
 ## [1.6.0](https://github.com/timo-reymann/mealie-calorie-estimator/compare/v1.5.4...v1.6.0) (2026-06-24)
 
 ### Features
