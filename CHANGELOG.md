@@ -1,3 +1,9 @@
+## [1.9.0](https://github.com/timo-reymann/mealie-calorie-estimator/compare/v1.8.0...v1.9.0) (2026-07-26)
+
+### Features
+
+* add LLM_ENDPOINT_URL for OpenAI-compatible providers ([9c9b200](https://github.com/timo-reymann/mealie-calorie-estimator/commit/9c9b2008f4e2b7fcbdb7d2e8891faad285e0c89f)), closes [#14](https://github.com/timo-reymann/mealie-calorie-estimator/issues/14)
+
 ## [1.8.0](https://github.com/timo-reymann/mealie-calorie-estimator/compare/v1.7.0...v1.8.0) (2026-07-11)
 
 ### Features
