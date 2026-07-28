@@ -301,7 +301,8 @@ export async function verifyNutritionCandidates(
 
   const prompt = [
     "Select the structured-source candidate that represents each culinary ingredient and its preparation state, or reject all by returning an empty candidateId.",
-    "Prefer a matching candidate with complete standard nutrition fields. Reject cooked, prepared, composite, or different-variety records when the ingredient or lookup query requires another state.",
+    "Prefer a matching candidate with complete standard nutrition fields. Reject cooked, prepared, composite, flavored, or different-variety records when the ingredient or lookup query requires another state. A product merely flavored with the ingredient is not the ingredient itself.",
+    "For a generic commodity or pantry ingredient, prefer a matching USDA Foundation or SR Legacy record over a branded database record. Use a branded record when the ingredient names that brand or product, or when no authoritative generic record matches.",
     "Only decide identity. Do not calculate, scale, sum, convert units, estimate servings, or provide nutrition values.",
     "Candidate IDs must be copied exactly from the supplied list.",
     JSON.stringify(

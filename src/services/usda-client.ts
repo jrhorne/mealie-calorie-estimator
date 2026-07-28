@@ -115,7 +115,7 @@ async function search(foodName: string): Promise<UsdaFood[]> {
     api_key: config.usda.apiKey,
     query: foodName,
     pageSize: "10",
-    dataType: "Foundation,SR Legacy,Survey (FNDDS)",
+    dataType: "Foundation,SR Legacy",
   })
   const url = `${config.usda.baseUrl.replace(/\/+$/, "")}/foods/search?${params}`
 

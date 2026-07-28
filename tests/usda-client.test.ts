@@ -47,6 +47,9 @@ describe("lookupUsdaNutrients", () => {
     const result = await lookupUsdaNutrients("raw apple")
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
+    const calledUrl = fetchMock.mock.calls[0][0] as string
+    expect(calledUrl).toContain("dataType=Foundation%2CSR+Legacy")
+    expect(calledUrl).not.toContain("FNDDS")
     expect(result).toMatchObject({
       matched: true,
       productName: "APPLE, RAW",

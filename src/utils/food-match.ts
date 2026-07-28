@@ -32,6 +32,19 @@ const DESCRIPTOR_TOKENS = new Set([
   "yellow",
 ])
 
+const SIMPLE_INGREDIENT_FORM_TOKENS = new Set([
+  ...DESCRIPTOR_TOKENS,
+  "fine",
+  "leaf",
+  "organic",
+  "peeled",
+  "powder",
+  "seed",
+  "spice",
+  "unsalted",
+  "unsweetened",
+])
+
 function singularize(token: string): string {
   if (token.endsWith("ies") && token.length > 4) return `${token.slice(0, -3)}y`
   if (token.endsWith("oes") && token.length > 4) return token.slice(0, -2)
@@ -90,10 +103,19 @@ export function scoreFoodMatch(
   if (hasUnexpectedComposite) score -= 0.35
 
   const normalizedDataType = dataType?.toLowerCase() ?? ""
-  if (normalizedDataType.includes("foundation") || normalizedDataType.includes("sr legacy")) {
+  const isAuthoritativeGeneric =
+    normalizedDataType.includes("foundation") || normalizedDataType.includes("sr legacy")
+  if (isAuthoritativeGeneric) {
     score += 0.1
   } else if (normalizedDataType.includes("survey") || normalizedDataType.includes("fndds")) {
     score -= 0.1
+  }
+
+  if (queryTokens.length === 1 && !isAuthoritativeGeneric) {
+    const hasUnexplainedExtraToken = candidateTokens.some(
+      (token) => !querySet.has(token) && !SIMPLE_INGREDIENT_FORM_TOKENS.has(token),
+    )
+    if (hasUnexplainedExtraToken) score -= 0.5
   }
 
   return Math.max(0, Math.min(1, Math.round(score * 1000) / 1000))

@@ -6,6 +6,7 @@ describe("scoreFoodMatch", () => {
     ["Italian seasoning", "Bread, Italian", "Survey (FNDDS)"],
     ["peppers", "Pepper steak", "Survey (FNDDS)"],
     ["whole-wheat rotini", "Bagel, whole wheat", "Survey (FNDDS)"],
+    ["paprika", "Paprika Frischkäsezubereitung", "branded"],
   ])("rejects unrelated composite match %s -> %s", (query, candidate, dataType) => {
     expect(foodMatchIsPlausible(scoreFoodMatch(query, candidate, dataType))).toBe(false)
   })
@@ -16,6 +17,8 @@ describe("scoreFoodMatch", () => {
     ["whole-wheat rotini", "Pasta, whole-wheat, rotini, dry", "Foundation"],
     ["yellow onion", "Onions, yellow, raw", "Foundation"],
     ["cream", "Cream, fluid, light", "Foundation"],
+    ["garlic", "Fresh peeled garlic", "branded"],
+    ["paprika", "Paprika powder", "branded"],
   ])("accepts plausible generic match %s -> %s", (query, candidate, dataType) => {
     expect(foodMatchIsPlausible(scoreFoodMatch(query, candidate, dataType))).toBe(true)
   })
