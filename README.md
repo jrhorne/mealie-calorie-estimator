@@ -112,6 +112,9 @@ It's recommended to install it next to your Mealie instance using docker-compose
 | `LLM_BASE_URL` | `https://api.mistral.ai/v1` | LLM API base URL |
 | `LLM_ENDPOINT_URL` | `/chat/completions` | LLM API endpoint path (supports OpenAI-compatible providers) |
 | `LLM_MODEL` | `mistral-small-latest` | Model name |
+| `LLM_STRUCTURED_OUTPUTS` | `true` | Request schema-enforced JSON from compatible OpenAI-style endpoints |
+| `LLM_WEIGHT_MAX_TOKENS` | `64` | Output-token limit for unit and item weight estimates |
+| `LLM_NUTRIENT_MAX_TOKENS` | `256` | Output-token limit for nutrient estimates |
 | `ESTIMATE_STRATEGY` | `all` | Estimation strategy: `all` (estimate every recipe) or `tagged` (only estimate recipes with the `ESTIMATE_TAG` tag) |
 | `ESTIMATE_TAG` | `estimate` | Tag name to check when `ESTIMATE_STRATEGY=tagged` |
 | `PORT` | `8000` | Server port |

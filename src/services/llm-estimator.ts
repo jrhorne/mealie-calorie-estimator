@@ -4,6 +4,106 @@ import { getCachedLlmEstimate, setCachedLlmEstimate, getCachedLlmNutrients, setC
 import { waitForRateLimit, RateLimitType } from "../utils/rate-limiter.js"
 import type { NutrientSet } from "../types.js"
 
+interface LlmUsage {
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
+}
+
+interface LlmResponse {
+  model?: string
+  provider?: string
+  choices?: Array<{
+    finish_reason?: string
+    message?: {
+      content?: string | Array<{ type?: string; text?: string }> | null
+    }
+  }>
+  usage?: LlmUsage
+}
+
+const weightResponseFormat = {
+  type: "json_schema",
+  json_schema: {
+    name: "weight_estimate",
+    strict: true,
+    schema: {
+      type: "object",
+      properties: {
+        grams: { type: "number", minimum: 0 },
+      },
+      required: ["grams"],
+      additionalProperties: false,
+    },
+  },
+}
+
+const nutrientResponseFormat = {
+  type: "json_schema",
+  json_schema: {
+    name: "nutrient_estimate",
+    strict: true,
+    schema: {
+      type: "object",
+      properties: {
+        kcal: { type: "number", minimum: 0 },
+        protein: { type: "number", minimum: 0 },
+        carbs: { type: "number", minimum: 0 },
+        fat: { type: "number", minimum: 0 },
+        saturatedFat: { type: "number", minimum: 0 },
+        transFat: { type: "number", minimum: 0 },
+        fiber: { type: "number", minimum: 0 },
+        sugar: { type: "number", minimum: 0 },
+        sodium: { type: "number", minimum: 0 },
+        cholesterol: { type: "number", minimum: 0 },
+      },
+      required: [
+        "kcal", "protein", "carbs", "fat", "saturatedFat",
+        "transFat", "fiber", "sugar", "sodium", "cholesterol",
+      ],
+      additionalProperties: false,
+    },
+  },
+}
+
+function endpointUrl(): string {
+  return `${config.llm.baseUrl.replace(/\/+$/, "")}/${config.llm.endpointUrl.replace(/^\/+/, "")}`
+}
+
+function extractContent(data: LlmResponse): string | null {
+  const content = data.choices?.[0]?.message?.content
+  if (typeof content === "string") return content.trim() || null
+  if (!Array.isArray(content)) return null
+
+  const text = content
+    .filter((part) => part.type === "text" || part.type == null)
+    .map((part) => part.text ?? "")
+    .join("")
+    .trim()
+  return text || null
+}
+
+function parseJson(content: string): Record<string, unknown> {
+  return JSON.parse(content.replace(/```json\n?|\n?```/g, ""))
+}
+
+function logCompletion(data: LlmResponse, estimateType: "weight" | "nutrients", foodName: string): void {
+  logger.info(
+    {
+      estimateType,
+      foodName,
+      configuredModel: config.llm.model,
+      responseModel: data.model,
+      provider: data.provider,
+      finishReason: data.choices?.[0]?.finish_reason,
+      promptTokens: data.usage?.prompt_tokens,
+      completionTokens: data.usage?.completion_tokens,
+      totalTokens: data.usage?.total_tokens,
+    },
+    "LLM estimation response received",
+  )
+}
+
 export async function estimateGrams(quantity: number, unitName: string, foodName: string): Promise<number | null> {
   if (!config.llm.enabled) return null
   if (!config.llm.apiKey) {
@@ -18,23 +118,28 @@ export async function estimateGrams(quantity: number, unitName: string, foodName
     return totalGrams
   }
 
-  const prompt = `Estimate the weight in grams for 1 ${unitName} of ${foodName}. Consider typical packaging sizes and food densities. Return ONLY a single number (the weight in grams). No explanation, no unit, no punctuation. If you cannot estimate, return 0.`
+  const prompt = `Estimate the typical weight in grams for 1 ${unitName} of "${foodName}". For "item", use the typical edible weight of one whole item. Consider typical packaging sizes and food densities. Return 0 only when a reasonable estimate is impossible.`
 
   try {
     await waitForRateLimit(RateLimitType.Llm)
 
-    const res = await fetch(`${config.llm.baseUrl}${config.llm.endpointUrl}`, {
+    const body: Record<string, unknown> = {
+      model: config.llm.model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.1,
+      max_tokens: config.llm.weightMaxTokens,
+    }
+    if (config.llm.structuredOutputs) {
+      body.response_format = weightResponseFormat
+    }
+
+    const res = await fetch(endpointUrl(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.llm.apiKey}`,
       },
-      body: JSON.stringify({
-        model: config.llm.model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.1,
-        max_tokens: 10,
-      }),
+      body: JSON.stringify(body),
     })
 
     if (!res.ok) {
@@ -42,19 +147,29 @@ export async function estimateGrams(quantity: number, unitName: string, foodName
       return null
     }
 
-    const data: any = await res.json()
-    const content = data?.choices?.[0]?.message?.content
+    const data = await res.json() as LlmResponse
+    const content = extractContent(data)
+    logCompletion(data, "weight", foodName)
 
-    if (content == null) {
-      logger.warn({ unitName, foodName }, "LLM returned empty response")
+    if (!content) {
+      logger.warn(
+        {
+          unitName,
+          foodName,
+          configuredModel: config.llm.model,
+          responseModel: data.model,
+          finishReason: data.choices?.[0]?.finish_reason,
+        },
+        "LLM returned empty response",
+      )
       return null
     }
 
-    const trimmed = content.trim()
-    const num = parseInt(trimmed, 10)
+    const parsed = config.llm.structuredOutputs ? parseJson(content).grams : content
+    const num = Number(parsed)
 
-    if (isNaN(num) || num <= 0) {
-      logger.warn({ unitName, foodName, llmResponse: trimmed }, "LLM returned invalid number")
+    if (!Number.isFinite(num) || num <= 0) {
+      logger.warn({ unitName, foodName }, "LLM returned invalid weight")
       return null
     }
 
@@ -62,7 +177,10 @@ export async function estimateGrams(quantity: number, unitName: string, foodName
     const totalGrams = gramsPerUnit * quantity
 
     setCachedLlmEstimate(unitName, foodName, gramsPerUnit)
-    logger.debug({ unitName, foodName, gramsPerUnit, totalGrams }, "LLM estimate obtained")
+    logger.info(
+      { unitName, foodName, gramsPerUnit, totalGrams, model: data.model ?? config.llm.model },
+      "LLM weight estimate obtained",
+    )
 
     return totalGrams
   } catch (err) {
@@ -80,23 +198,28 @@ export async function estimateNutrients(foodName: string): Promise<NutrientSet |
     return cached
   }
 
-  const prompt = `Estimate nutritional values per 100g for "${foodName}". Return ONLY valid JSON with these keys (all numbers, no units): {"kcal":0,"protein":0,"carbs":0,"fat":0,"saturatedFat":0,"transFat":0,"fiber":0,"sugar":0,"sodium":0,"cholesterol":0}. Use typical values for the food. No explanation, no markdown.`
+  const prompt = `Estimate typical nutritional values per 100g for "${foodName}". Return kcal in kilocalories; protein, carbs, fat, saturatedFat, transFat, fiber, and sugar in grams; sodium and cholesterol in milligrams. Use 0 only when the typical amount is effectively zero.`
 
   try {
     await waitForRateLimit(RateLimitType.Llm)
 
-    const res = await fetch(`${config.llm.baseUrl}${config.llm.endpointUrl}`, {
+    const body: Record<string, unknown> = {
+      model: config.llm.model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.1,
+      max_tokens: config.llm.nutrientMaxTokens,
+    }
+    if (config.llm.structuredOutputs) {
+      body.response_format = nutrientResponseFormat
+    }
+
+    const res = await fetch(endpointUrl(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.llm.apiKey}`,
       },
-      body: JSON.stringify({
-        model: config.llm.model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.1,
-        max_tokens: 200,
-      }),
+      body: JSON.stringify(body),
     })
 
     if (!res.ok) {
@@ -104,15 +227,24 @@ export async function estimateNutrients(foodName: string): Promise<NutrientSet |
       return null
     }
 
-    const data: any = await res.json()
-    const content = data?.choices?.[0]?.message?.content?.trim()
+    const data = await res.json() as LlmResponse
+    const content = extractContent(data)
+    logCompletion(data, "nutrients", foodName)
 
     if (!content) {
-      logger.warn({ foodName }, "LLM nutrient returned empty response")
+      logger.warn(
+        {
+          foodName,
+          configuredModel: config.llm.model,
+          responseModel: data.model,
+          finishReason: data.choices?.[0]?.finish_reason,
+        },
+        "LLM nutrient returned empty response",
+      )
       return null
     }
 
-    const json = JSON.parse(content.replace(/```json\n?|\n?```/g, ""))
+    const json = parseJson(content)
 
     const nutrients: NutrientSet = {
       kcalPer100g: Number(json.kcal) || null,
@@ -136,11 +268,14 @@ export async function estimateNutrients(foodName: string): Promise<NutrientSet |
 
     if (nutrients.kcalPer100g !== null && nutrients.kcalPer100g > 0) {
       setCachedLlmNutrients(foodName, nutrients)
-      logger.debug({ foodName, kcal: nutrients.kcalPer100g }, "LLM nutrient estimate obtained")
+      logger.info(
+        { foodName, kcal: nutrients.kcalPer100g, model: data.model ?? config.llm.model },
+        "LLM nutrient estimate obtained",
+      )
       return nutrients
     }
 
-    logger.debug({ foodName, content }, "LLM returned zero kcal, discarding")
+    logger.debug({ foodName }, "LLM returned zero kcal, discarding")
     return null
   } catch (err) {
     logger.warn({ err, foodName }, "LLM nutrient estimation failed")

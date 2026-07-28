@@ -120,13 +120,11 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
     let llmEstimated = false
 
     if (grams === null) {
-      const unitName = ing.unit?.name
-      if (unitName) {
-        const llmGrams = await estimateGrams(quantity, unitName, foodName)
-        if (llmGrams !== null) {
-          grams = llmGrams
-          llmEstimated = true
-        }
+      const unitName = ing.unit?.name ?? "item"
+      const llmGrams = await estimateGrams(quantity, unitName, foodName)
+      if (llmGrams !== null) {
+        grams = llmGrams
+        llmEstimated = true
       }
     }
 
@@ -222,6 +220,7 @@ export function buildNutritionPatch(
 
   if (llmIngredients.length > 0) {
     extras.calorie_estimator_llm_ingredients = JSON.stringify(llmIngredients)
+    extras.calorie_estimator_llm_model = config.llm.model
   }
 
   const p = result.perServingNutrients

@@ -53,6 +53,9 @@ export const config = {
     apiKey: process.env.LLM_API_KEY || "",
     model: process.env.LLM_MODEL || "mistral-small-latest",
     rateLimit: parseInt(process.env.LLM_RATE_LIMIT || "30", 10),
+    structuredOutputs: (process.env.LLM_STRUCTURED_OUTPUTS || "true").toLowerCase() === "true",
+    weightMaxTokens: parseInt(process.env.LLM_WEIGHT_MAX_TOKENS || "64", 10),
+    nutrientMaxTokens: parseInt(process.env.LLM_NUTRIENT_MAX_TOKENS || "256", 10),
   },
 
   estimate: {
