@@ -4,13 +4,17 @@ import type { MealieRecipe, NutrientSet } from "../src/types.js"
 const {
   estimateGramsMock,
   estimateNutrientsMock,
+  lookupOffCandidateByIdMock,
   lookupOffCandidatesMock,
+  lookupUsdaCandidateByIdMock,
   lookupUsdaCandidatesMock,
   verifyNutritionCandidatesMock,
 } = vi.hoisted(() => ({
   estimateGramsMock: vi.fn(),
   estimateNutrientsMock: vi.fn(),
+  lookupOffCandidateByIdMock: vi.fn(),
   lookupOffCandidatesMock: vi.fn(),
+  lookupUsdaCandidateByIdMock: vi.fn(),
   lookupUsdaCandidatesMock: vi.fn(),
   verifyNutritionCandidatesMock: vi.fn(),
 }))
@@ -20,10 +24,12 @@ vi.mock("../src/services/unit-converter.js", () => ({
 }))
 
 vi.mock("../src/services/off-client.js", () => ({
+  lookupOffCandidateById: lookupOffCandidateByIdMock,
   lookupOffCandidates: lookupOffCandidatesMock,
 }))
 
 vi.mock("../src/services/usda-client.js", () => ({
+  lookupUsdaCandidateById: lookupUsdaCandidateByIdMock,
   lookupUsdaCandidates: lookupUsdaCandidatesMock,
 }))
 
@@ -60,7 +66,9 @@ beforeEach(() => {
     source: "openfoodfacts",
     matchScore: 1,
   }])
+  lookupOffCandidateByIdMock.mockResolvedValue(null)
   lookupUsdaCandidatesMock.mockResolvedValue([])
+  lookupUsdaCandidateByIdMock.mockResolvedValue(null)
   verifyNutritionCandidatesMock.mockResolvedValue(new Map([
     ["peppers", {
       ingredient: "peppers",

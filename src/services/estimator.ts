@@ -5,8 +5,8 @@ import type {
 } from "../types.js"
 import { config } from "../config.js"
 import { convertToGrams } from "./unit-converter.js"
-import { lookupOffCandidates } from "./off-client.js"
-import { lookupUsdaCandidates } from "./usda-client.js"
+import { lookupOffCandidateById, lookupOffCandidates } from "./off-client.js"
+import { lookupUsdaCandidateById, lookupUsdaCandidates } from "./usda-client.js"
 import {
   estimateGrams,
   verifyNutritionCandidates,
@@ -156,9 +156,18 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
           ...await lookupUsdaCandidates(lookupQuery),
         ]
           .sort((left, right) => right.matchScore - left.matchScore)
-    const candidates = override?.providerId
+    let candidates = override?.providerId
       ? rankedCandidates
       : rankedCandidates.slice(0, 5)
+    if (
+      override?.providerId
+      && !candidates.some((candidate) => candidate.id === override.providerId)
+    ) {
+      const exactCandidate = override.providerId.startsWith("openfoodfacts:")
+        ? await lookupOffCandidateById(override.providerId)
+        : await lookupUsdaCandidateById(override.providerId)
+      if (exactCandidate) candidates = [...candidates, exactCandidate]
+    }
     preparedIngredients.push({
       name: foodName,
       lookupQuery,

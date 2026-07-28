@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest"
-import { lookupNutrients } from "../src/services/off-client.js"
+import { lookupNutrients, lookupOffCandidateById } from "../src/services/off-client.js"
 import { initCache, setCachedNutrients } from "../src/utils/cache.js"
 import { config } from "../src/config.js"
 
@@ -118,6 +118,30 @@ describe("lookupNutrients", () => {
     expect(result.nutrients).toMatchObject({
       kcalPer100g: 0,
       sodiumPer100g: 38_758,
+    })
+  })
+
+  it("fetches an exact manually pinned product outside search results", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        product: {
+          code: "1234567890123",
+          product_name: "Pinned whole wheat pasta",
+          nutriments: MILK_NUTRIMENTS,
+        },
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    )
+
+    const candidate = await lookupOffCandidateById("openfoodfacts:1234567890123")
+
+    expect(fetchMock.mock.calls[0][0]).toContain("/api/v2/product/1234567890123")
+    expect(candidate).toMatchObject({
+      id: "openfoodfacts:1234567890123",
+      productName: "Pinned whole wheat pasta",
+      matchScore: 1,
     })
   })
 })

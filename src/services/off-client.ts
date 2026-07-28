@@ -222,6 +222,52 @@ export async function lookupOffCandidates(
   return limited
 }
 
+export async function lookupOffCandidateById(
+  providerId: string,
+): Promise<NutritionCandidate | null> {
+  const prefix = "openfoodfacts:"
+  if (!providerId.startsWith(prefix)) return null
+  const code = providerId.slice(prefix.length).trim()
+  if (!code || code.startsWith("legacy:")) return null
+
+  const cacheKey = `openfoodfacts:id:${code}`
+  const cached = getCachedProviderCandidates(cacheKey)
+  if (cached?.[0]) return cached[0]
+
+  const url =
+    `${config.openFoodFacts.baseUrl.replace(/\/+$/, "")}/api/v2/product/`
+    + `${encodeURIComponent(code)}?fields=${encodeURIComponent(OFF_NUTRIENT_FIELDS)}`
+  await waitForRateLimit(RateLimitType.Product)
+  const res = await fetchWithRetry(url, providerId)
+  if (!res?.ok) {
+    logger.warn({ providerId, status: res?.status }, "OFF product lookup returned error")
+    return null
+  }
+
+  let product: OffProduct | undefined
+  try {
+    const data = (await res.json()) as { product?: OffProduct }
+    product = data.product
+  } catch {
+    logger.warn({ providerId }, "OFF product lookup returned non-JSON response")
+    return null
+  }
+
+  if (!product?.nutriments || !product.product_name) return null
+  const nutrients = extractNutrients(product.nutriments)
+  if (nutrients.kcalPer100g === null) return null
+  const candidate: NutritionCandidate = {
+    id: providerId,
+    nutrients,
+    productName: product.product_name,
+    source: "openfoodfacts",
+    matchScore: 1,
+    dataType: "branded",
+  }
+  setCachedProviderCandidates(cacheKey, [candidate])
+  return candidate
+}
+
 export async function lookupNutrients(
   foodName: string,
   unitName?: string,

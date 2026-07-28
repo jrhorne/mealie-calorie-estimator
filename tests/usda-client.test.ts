@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { config } from "../src/config.js"
-import { lookupUsdaNutrients } from "../src/services/usda-client.js"
+import { lookupUsdaCandidateById, lookupUsdaNutrients } from "../src/services/usda-client.js"
 import { initCache } from "../src/utils/cache.js"
 
 const originalApiKey = config.usda.apiKey
@@ -149,5 +149,46 @@ describe("lookupUsdaNutrients", () => {
     await lookupUsdaNutrients("temporary USDA miss regression")
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("fetches an exact manually pinned food and maps detail nutrients", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        fdcId: 169738,
+        description: "Pasta, whole-wheat, dry",
+        dataType: "SR Legacy",
+        foodNutrients: [
+          {
+            nutrient: { id: 1008, name: "Energy", unitName: "kcal" },
+            amount: 352,
+          },
+          {
+            nutrient: { id: 1003, name: "Protein", unitName: "g" },
+            amount: 13.87,
+          },
+          {
+            nutrient: { id: 1093, name: "Sodium", unitName: "mg" },
+            amount: 8,
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    )
+
+    const candidate = await lookupUsdaCandidateById("usda:169738")
+
+    expect(fetchMock.mock.calls[0][0]).toContain("/food/169738?api_key=")
+    expect(candidate).toMatchObject({
+      id: "usda:169738",
+      productName: "Pasta, whole-wheat, dry",
+      dataType: "SR Legacy",
+      nutrients: {
+        kcalPer100g: 352,
+        proteinPer100g: 13.87,
+        sodiumPer100g: 8,
+      },
+    })
   })
 })

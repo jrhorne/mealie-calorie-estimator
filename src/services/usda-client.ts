@@ -13,10 +13,16 @@ import { logger } from "../utils/logger.js"
 import { RateLimitType, waitForRateLimit } from "../utils/rate-limiter.js"
 
 interface UsdaNutrient {
-  nutrientId: number
-  nutrientName: string
-  unitName: string
-  value: number
+  nutrientId?: number
+  nutrientName?: string
+  unitName?: string
+  value?: number
+  amount?: number
+  nutrient?: {
+    id: number
+    name?: string
+    unitName: string
+  }
 }
 
 interface UsdaFood {
@@ -62,14 +68,18 @@ function valueFor(
   nutrientId: number,
   target: "g" | "mg" | "kcal",
 ): number | null {
-  const nutrient = food.foodNutrients?.find((item) => item.nutrientId === nutrientId)
-  if (!nutrient || !Number.isFinite(nutrient.value)) return null
+  const nutrient = food.foodNutrients?.find(
+    (item) => (item.nutrientId ?? item.nutrient?.id) === nutrientId,
+  )
+  const value = nutrient?.value ?? nutrient?.amount
+  const unitName = nutrient?.unitName ?? nutrient?.nutrient?.unitName
+  if (!nutrient || !Number.isFinite(value) || !unitName) return null
   if (target === "kcal") {
-    return nutrient.unitName.toLowerCase() === "kj"
-      ? nutrient.value / 4.184
-      : nutrient.value
+    return unitName.toLowerCase() === "kj"
+      ? value! / 4.184
+      : value!
   }
-  return convertMass(nutrient.value, nutrient.unitName, target)
+  return convertMass(value!, unitName, target)
 }
 
 function extractNutrients(food: UsdaFood): NutrientSet {
@@ -196,6 +206,62 @@ export async function lookupUsdaCandidates(
     })),
   }, "USDA candidates found")
   return limited
+}
+
+export async function lookupUsdaCandidateById(
+  providerId: string,
+): Promise<NutritionCandidate | null> {
+  if (!config.usda.apiKey || !providerId.startsWith("usda:")) return null
+  const idText = providerId.slice("usda:".length).trim()
+  if (!/^\d+$/.test(idText)) return null
+
+  const cacheKey = `usda:id:${idText}`
+  const cached = getCachedProviderCandidates(cacheKey)
+  if (cached?.[0]) return cached[0]
+
+  const url =
+    `${config.usda.baseUrl.replace(/\/+$/, "")}/food/${idText}`
+    + `?api_key=${encodeURIComponent(config.usda.apiKey)}`
+  let food: UsdaFood | null = null
+  for (let attempt = 0; attempt <= config.usda.maxRetries; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, config.usda.retryBackoffMs * 2 ** (attempt - 1)),
+      )
+    }
+    await waitForRateLimit(RateLimitType.Usda)
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(config.usda.timeoutMs),
+      })
+      if (!response.ok) {
+        if (RETRYABLE_STATUS.has(response.status) && attempt < config.usda.maxRetries) continue
+        logger.warn({ providerId, status: response.status }, "USDA food lookup returned error")
+        return null
+      }
+      food = (await response.json()) as UsdaFood
+      break
+    } catch (error) {
+      if (attempt === config.usda.maxRetries) {
+        logger.warn({ providerId, error }, "USDA food lookup failed")
+        return null
+      }
+    }
+  }
+
+  if (!food || food.fdcId !== Number(idText) || !food.foodNutrients?.length) return null
+  const nutrients = extractNutrients(food)
+  if (!hasMeaningfulNutrients(nutrients)) return null
+  const candidate: NutritionCandidate = {
+    id: providerId,
+    nutrients,
+    productName: food.description,
+    source: "usda",
+    matchScore: 1,
+    dataType: food.dataType,
+  }
+  setCachedProviderCandidates(cacheKey, [candidate])
+  return candidate
 }
 
 export async function lookupUsdaNutrients(
