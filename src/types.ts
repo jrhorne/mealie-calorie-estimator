@@ -138,6 +138,7 @@ export interface NutritionCandidate {
 
 export interface NutritionCandidateGroup {
   ingredient: string
+  lookupQuery?: string
   candidates: NutritionCandidate[]
 }
 
@@ -162,6 +163,7 @@ export interface NutritionLookupResult {
 
 export interface IngredientMatch {
   name: string
+  lookupQuery?: string | null
   grams: number | null
   matched: boolean
   nutrients: NutrientSet | null
@@ -173,7 +175,12 @@ export interface IngredientMatch {
   matchScore?: number | null
   verificationReason?: string | null
   verifiedBy?: NutritionCandidateDecision["verifiedBy"] | null
-  weightSource?: "unit-converter" | "llm"
+  weightSource?: "unit-converter" | "llm" | "override"
+}
+
+export interface NutritionOverride {
+  query?: string
+  grams?: number
 }
 
 export interface EstimateResult {

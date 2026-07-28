@@ -1,7 +1,7 @@
 import crypto from "node:crypto"
 import type {
   MealieRecipe, IngredientMatch, EstimateResult, NutritionPatch,
-  NutrientSet, MealieNutrition, NutritionCandidate,
+  NutrientSet, MealieNutrition, NutritionCandidate, NutritionOverride,
 } from "../types.js"
 import { config } from "../config.js"
 import { convertToGrams } from "./unit-converter.js"
@@ -32,8 +32,42 @@ export function computeIngredientHash(recipe: MealieRecipe): string {
   parts.sort()
   parts.push(`yield:${recipe.recipeYield ?? ""}`)
   parts.push(`servings:${recipe.recipeServings ?? ""}`)
+  parts.push(`overrides:${JSON.stringify(getNutritionOverrides(recipe))}`)
   const hash = crypto.createHash("sha256").update(parts.join(",")).digest("hex")
   return hash
+}
+
+export function getNutritionOverrides(
+  recipe: MealieRecipe,
+): Record<string, NutritionOverride> {
+  const raw = recipe.extras?.calorie_estimator_overrides
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .flatMap(([name, value]) => {
+          if (typeof value === "string" && value.trim()) {
+            return [[name.toLowerCase().trim(), { query: value.trim() }]]
+          }
+          if (typeof value !== "object" || value === null) return []
+          const candidate = value as Record<string, unknown>
+          const override: NutritionOverride = {}
+          if (typeof candidate.query === "string" && candidate.query.trim()) {
+            override.query = candidate.query.trim()
+          }
+          const grams = Number(candidate.grams)
+          if (Number.isFinite(grams) && grams > 0) override.grams = grams
+          return override.query || override.grams
+            ? [[name.toLowerCase().trim(), override]]
+            : []
+        }),
+    )
+  } catch {
+    logger.warn({ slug: recipe.slug }, "Ignoring invalid nutrition override JSON")
+    return {}
+  }
 }
 
 export function shouldEstimate(recipe: MealieRecipe): boolean {
@@ -61,8 +95,9 @@ export function parseYield(recipeYield: string | null): number | null {
 export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResult> {
   interface PreparedIngredient {
     name: string
+    lookupQuery: string
     grams: number | null
-    weightSource: "unit-converter" | "llm"
+    weightSource: "unit-converter" | "llm" | "override"
     candidates: NutritionCandidate[]
   }
 
@@ -70,6 +105,7 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
   const unmatchedNames: string[] = []
   let totalNutrients = emptyNutrients()
   const preparedIngredients: PreparedIngredient[] = []
+  const overrides = getNutritionOverrides(recipe)
 
   for (const ing of recipe.recipeIngredient) {
     const foodName = ing.food?.name
@@ -79,8 +115,11 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
       continue
     }
 
-    let grams = convertToGrams(quantity, ing.unit)
+    const override = overrides[foodName.toLowerCase().trim()]
+    const lookupQuery = override?.query ?? foodName
+    let grams = override?.grams ?? convertToGrams(quantity, ing.unit)
     let weightSource: PreparedIngredient["weightSource"] = "unit-converter"
+    if (override?.grams !== undefined) weightSource = "override"
 
     if (grams === null) {
       const unitName = ing.unit?.name ?? "item"
@@ -92,18 +131,24 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
     }
 
     if (grams === null) {
-      preparedIngredients.push({ name: foodName, grams: null, weightSource, candidates: [] })
+      preparedIngredients.push({
+        name: foodName,
+        lookupQuery,
+        grams: null,
+        weightSource,
+        candidates: [],
+      })
       continue
     }
 
-    const offCandidates = await lookupOffCandidates(foodName, ing.unit?.name)
+    const offCandidates = await lookupOffCandidates(lookupQuery, ing.unit?.name)
     const candidates = offCandidates.some((candidate) => candidate.source === "known")
       ? offCandidates
       : [
           ...offCandidates,
-          ...await lookupUsdaCandidates(foodName),
+          ...await lookupUsdaCandidates(lookupQuery),
         ].sort((left, right) => right.matchScore - left.matchScore).slice(0, 5)
-    preparedIngredients.push({ name: foodName, grams, weightSource, candidates })
+    preparedIngredients.push({ name: foodName, lookupQuery, grams, weightSource, candidates })
   }
 
   const decisions = await verifyNutritionCandidates(
@@ -111,16 +156,24 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
       .filter((ingredient) => ingredient.grams !== null)
       .map((ingredient) => ({
         ingredient: ingredient.name,
+        lookupQuery: ingredient.lookupQuery,
         candidates: ingredient.candidates,
       })),
   )
 
   for (const ingredient of preparedIngredients) {
-    const { name: foodName, grams, weightSource, candidates } = ingredient
+    const {
+      name: foodName,
+      lookupQuery,
+      grams,
+      weightSource,
+      candidates,
+    } = ingredient
     if (grams === null) {
       unmatchedNames.push(foodName)
       matchedIngredients.push({
         name: foodName,
+        lookupQuery,
         grams: null,
         matched: false,
         nutrients: null,
@@ -141,6 +194,7 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
         totalNutrients = addScaledNutrients(totalNutrients, llmNutrients, grams)
         matchedIngredients.push({
           name: foodName,
+          lookupQuery,
           grams,
           matched: true,
           nutrients: llmNutrients,
@@ -156,6 +210,7 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
       unmatchedNames.push(foodName)
       matchedIngredients.push({
         name: foodName,
+        lookupQuery,
         grams,
         matched: false,
         nutrients: null,
@@ -170,6 +225,7 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
     totalNutrients = addScaledNutrients(totalNutrients, candidate.nutrients, grams)
     matchedIngredients.push({
       name: foodName,
+      lookupQuery,
       grams,
       matched: true,
       nutrients: candidate.nutrients,
@@ -233,6 +289,7 @@ export function buildManualAckPatch(recipe: MealieRecipe, hash: string): Nutriti
   return {
     nutrition: {},
     extras: {
+      ...recipe.extras,
       calorie_estimator_hash: hash,
       calorie_estimator_unmatched: JSON.stringify([]),
       calorie_estimator_note: "Manual — preserved existing calorie entry",
@@ -259,6 +316,7 @@ export function buildNutritionPatch(
     calorie_estimator_provenance: JSON.stringify(
       result.matchedIngredients.map((ingredient) => ({
         name: ingredient.name,
+        lookupQuery: ingredient.lookupQuery ?? null,
         grams: ingredient.grams,
         matched: ingredient.matched,
         nutritionSource: ingredient.nutritionSource ?? null,

@@ -102,4 +102,40 @@ describe("estimateRecipe unitless counts", () => {
     expect(result.matchedIngredients[0].llmEstimated).toBe(true)
     expect(result.matchedIngredients[0].confidence).toBe("low")
   })
+
+  it("uses a manual canonical query and total gram override without LLM weight math", async () => {
+    const recipe: MealieRecipe = {
+      slug: "pepper-override-test",
+      name: "Pepper Override Test",
+      recipeYield: "3 servings",
+      recipeServings: 3,
+      nutrition: null,
+      tags: [],
+      extras: {
+        calorie_estimator_overrides: JSON.stringify({
+          peppers: { query: "bell peppers", grams: 360 },
+        }),
+      },
+      recipeIngredient: [{
+        quantity: 3,
+        unit: null,
+        food: { id: "food-1", name: "peppers", pluralName: null, aliases: [] },
+        note: "diced",
+        display: "3 peppers, diced",
+        title: null,
+        originalText: "3 peppers, diced",
+      }],
+    }
+
+    const result = await estimateRecipe(recipe)
+
+    expect(estimateGramsMock).not.toHaveBeenCalled()
+    expect(lookupOffCandidatesMock).toHaveBeenCalledWith("bell peppers", undefined)
+    expect(result.matchedIngredients[0]).toMatchObject({
+      name: "peppers",
+      lookupQuery: "bell peppers",
+      grams: 360,
+      weightSource: "override",
+    })
+  })
 })

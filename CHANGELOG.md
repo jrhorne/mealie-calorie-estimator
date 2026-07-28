@@ -5,6 +5,7 @@
 * verify structured nutrition candidates in one schema-constrained LLM call per recipe
 * add non-mutating preview and explicit apply endpoints
 * record provider IDs, match scores, verification reasons, and weight sources
+* support persistent per-recipe canonical-query and total-gram overrides
 
 ### Bug Fixes
 

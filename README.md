@@ -163,6 +163,21 @@ LLM never receives or returns recipe totals. Unit conversion, per-100-gram
 scaling, ingredient summation, and serving division are performed with
 fixed-point application code.
 
+Per-recipe canonical food or total-weight corrections can be stored in the
+recipe extra `calorie_estimator_overrides`:
+
+```json
+{
+  "peppers": { "query": "bell peppers", "grams": 360 },
+  "pepper": { "query": "black pepper" },
+  "whole-wheat rotini": { "grams": 454 },
+  "cream": { "query": "heavy cream" }
+}
+```
+
+Overrides are included in the recipe hash, preserved across estimator writes,
+and recorded as the lookup query and weight source in provenance.
+
 ## Motivation
 
 <!-- Add bit of context why the project has been created -->

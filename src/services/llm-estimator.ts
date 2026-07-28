@@ -211,7 +211,7 @@ function matchCacheKey(group: NutritionCandidateGroup): string {
     .map((candidate) => `${candidate.id}:${candidate.matchScore}`)
     .sort()
     .join("|")
-  return `${group.ingredient}|${signature}`
+  return `${group.ingredient}|${group.lookupQuery ?? group.ingredient}|${signature}`
 }
 
 function capMatchConfidence(
@@ -286,6 +286,7 @@ export async function verifyNutritionCandidates(
     JSON.stringify(
       pending.map((group) => ({
         ingredient: group.ingredient,
+        lookupQuery: group.lookupQuery ?? group.ingredient,
         candidates: group.candidates.map((candidate) => ({
           candidateId: candidate.id,
           name: candidate.productName,

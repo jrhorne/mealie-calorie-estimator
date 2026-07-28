@@ -104,6 +104,19 @@ describe("computeIngredientHash", () => {
     expect(computeIngredientHash(a)).not.toBe(computeIngredientHash(b))
   })
 
+  it("includes nutrition overrides in the ingredient hash", () => {
+    const plain = makeRecipe()
+    const overridden = makeRecipe({
+      extras: {
+        calorie_estimator_overrides: JSON.stringify({
+          cream: { query: "heavy cream" },
+        }),
+      },
+    })
+
+    expect(computeIngredientHash(plain)).not.toBe(computeIngredientHash(overridden))
+  })
+
   it("produces same hash when yield string differs but parsed servings are same", () => {
     const a = makeRecipe({ recipeYield: "4 servings", recipeServings: 4 })
     const b = makeRecipe({ recipeYield: "4 Portionen", recipeServings: 4 })
@@ -251,6 +264,7 @@ describe("buildNutritionPatch", () => {
     expect(provenance).toEqual([
       {
         name: "salt",
+        lookupQuery: null,
         grams: 5,
         matched: true,
         nutritionSource: "known",
