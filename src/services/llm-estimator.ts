@@ -272,6 +272,19 @@ export async function verifyNutritionCandidates(
   const pending: NutritionCandidateGroup[] = []
 
   for (const group of groups) {
+    const knownCandidate = group.candidates.find(
+      (candidate) => candidate.source === "known" && candidate.matchScore === 1,
+    )
+    if (knownCandidate) {
+      decisions.set(group.ingredient, {
+        ingredient: group.ingredient,
+        candidateId: knownCandidate.id,
+        confidence: "high",
+        reason: "Deterministic known composition",
+        verifiedBy: "deterministic",
+      })
+      continue
+    }
     if (group.candidates.length === 0) {
       decisions.set(group.ingredient, {
         ingredient: group.ingredient,

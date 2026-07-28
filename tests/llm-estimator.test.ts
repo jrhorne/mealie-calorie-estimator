@@ -228,6 +228,36 @@ describe("estimateNutrients", () => {
 })
 
 describe("verifyNutritionCandidates", () => {
+  it("selects deterministic known compositions without an LLM call", async () => {
+    config.llm.enabled = true
+    config.llm.apiKey = "sk-test"
+    const mockFetch = vi.fn()
+    vi.stubGlobal("fetch", mockFetch)
+
+    const decisions = await verifyNutritionCandidates([{
+      ingredient: "Kosher Salt deterministic test",
+      candidates: [{
+        id: "known:table-salt",
+        productName: "Known composition: table salt",
+        source: "known",
+        matchScore: 1,
+        nutrients: {
+          kcalPer100g: 0, proteinPer100g: 0, carbsPer100g: 0, fatPer100g: 0,
+          saturatedFatPer100g: 0, transFatPer100g: 0, unsaturatedFatPer100g: 0,
+          fiberPer100g: 0, sugarPer100g: 0, sodiumPer100g: 38758,
+          cholesterolPer100g: 0,
+        },
+      }],
+    }])
+
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(decisions.get("Kosher Salt deterministic test")).toMatchObject({
+      candidateId: "known:table-salt",
+      confidence: "high",
+      verifiedBy: "deterministic",
+    })
+  })
+
   it("fails closed on a near-match when LLM verification is unavailable", async () => {
     config.llm.enabled = false
 
