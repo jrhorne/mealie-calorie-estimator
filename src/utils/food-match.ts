@@ -46,6 +46,8 @@ const SIMPLE_INGREDIENT_FORM_TOKENS = new Set([
 ])
 
 function singularize(token: string): string {
+  if (token === "cookies") return "cookie"
+  if (token === "spices") return "spice"
   if (token.endsWith("ies") && token.length > 4) return `${token.slice(0, -3)}y`
   if (token.endsWith("oes") && token.length > 4) return token.slice(0, -2)
   if (token.endsWith("ses") && token.length > 4) return token.slice(0, -2)
