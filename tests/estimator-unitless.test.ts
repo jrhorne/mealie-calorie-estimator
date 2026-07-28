@@ -141,13 +141,15 @@ describe("estimateRecipe unitless counts", () => {
 
   it("uses an exact manual provider override without asking the LLM to arbitrate", async () => {
     lookupOffCandidatesMock.mockResolvedValue([
-      {
-        id: "openfoodfacts:prepared",
+      ...Array.from({ length: 5 }, (_, index) => ({
+        id: `openfoodfacts:prepared-${index}`,
         nutrients: { ...nutrients, kcalPer100g: 70 },
-        productName: "Whole Wheat Rotini, prepared",
+        productName: `Whole Wheat Rotini, prepared ${index}`,
         source: "openfoodfacts",
         matchScore: 1,
-      },
+      })),
+    ])
+    lookupUsdaCandidatesMock.mockResolvedValue([
       {
         id: "usda:dry",
         nutrients: { ...nutrients, kcalPer100g: 352 },

@@ -149,12 +149,16 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
     }
 
     const offCandidates = await lookupOffCandidates(lookupQuery, ing.unit?.name)
-    const candidates = offCandidates.some((candidate) => candidate.source === "known")
+    const rankedCandidates = offCandidates.some((candidate) => candidate.source === "known")
       ? offCandidates
       : [
           ...offCandidates,
           ...await lookupUsdaCandidates(lookupQuery),
-        ].sort((left, right) => right.matchScore - left.matchScore).slice(0, 5)
+        ]
+          .sort((left, right) => right.matchScore - left.matchScore)
+    const candidates = override?.providerId
+      ? rankedCandidates
+      : rankedCandidates.slice(0, 5)
     preparedIngredients.push({
       name: foodName,
       lookupQuery,
