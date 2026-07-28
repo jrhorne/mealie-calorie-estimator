@@ -9,7 +9,6 @@ import { lookupOffCandidates } from "./off-client.js"
 import { lookupUsdaCandidates } from "./usda-client.js"
 import {
   estimateGrams,
-  estimateNutrients,
   verifyNutritionCandidates,
 } from "./llm-estimator.js"
 import {
@@ -59,7 +58,13 @@ export function getNutritionOverrides(
           }
           const grams = Number(candidate.grams)
           if (Number.isFinite(grams) && grams > 0) override.grams = grams
-          return override.query || override.grams
+          if (
+            typeof candidate.providerId === "string"
+            && candidate.providerId.trim()
+          ) {
+            override.providerId = candidate.providerId.trim()
+          }
+          return override.query || override.grams || override.providerId
             ? [[name.toLowerCase().trim(), override]]
             : []
         }),
@@ -98,6 +103,7 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
     lookupQuery: string
     grams: number | null
     weightSource: "unit-converter" | "llm" | "override"
+    providerId?: string
     candidates: NutritionCandidate[]
   }
 
@@ -136,6 +142,7 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
         lookupQuery,
         grams: null,
         weightSource,
+        providerId: override?.providerId,
         candidates: [],
       })
       continue
@@ -148,12 +155,21 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
           ...offCandidates,
           ...await lookupUsdaCandidates(lookupQuery),
         ].sort((left, right) => right.matchScore - left.matchScore).slice(0, 5)
-    preparedIngredients.push({ name: foodName, lookupQuery, grams, weightSource, candidates })
+    preparedIngredients.push({
+      name: foodName,
+      lookupQuery,
+      grams,
+      weightSource,
+      providerId: override?.providerId,
+      candidates,
+    })
   }
 
   const decisions = await verifyNutritionCandidates(
     preparedIngredients
-      .filter((ingredient) => ingredient.grams !== null)
+      .filter((ingredient) =>
+        ingredient.grams !== null && ingredient.providerId === undefined
+      )
       .map((ingredient) => ({
         ingredient: ingredient.name,
         lookupQuery: ingredient.lookupQuery,
@@ -167,6 +183,7 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
       lookupQuery,
       grams,
       weightSource,
+      providerId,
       candidates,
     } = ingredient
     if (grams === null) {
@@ -183,30 +200,25 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
       continue
     }
 
-    const decision = decisions.get(foodName)
+    const overrideCandidate = providerId
+      ? candidates.find((item) => item.id === providerId)
+      : undefined
+    const decision = providerId
+      ? {
+          ingredient: foodName,
+          candidateId: overrideCandidate?.id ?? null,
+          confidence: overrideCandidate ? "high" as const : "low" as const,
+          reason: overrideCandidate
+            ? "Manual structured-source provider override"
+            : "Manual provider override was not found in current candidates",
+          verifiedBy: "override" as const,
+        }
+      : decisions.get(foodName)
     const candidate = decision?.candidateId
       ? candidates.find((item) => item.id === decision.candidateId)
       : undefined
 
     if (!candidate) {
-      const llmNutrients = await estimateNutrients(foodName)
-      if (llmNutrients !== null) {
-        totalNutrients = addScaledNutrients(totalNutrients, llmNutrients, grams)
-        matchedIngredients.push({
-          name: foodName,
-          lookupQuery,
-          grams,
-          matched: true,
-          nutrients: llmNutrients,
-          llmEstimated: true,
-          nutritionSource: "llm",
-          confidence: "low",
-          verificationReason: decision?.reason ?? "No structured-source match",
-          verifiedBy: decision?.verifiedBy ?? "deterministic",
-          weightSource,
-        })
-        continue
-      }
       unmatchedNames.push(foodName)
       matchedIngredients.push({
         name: foodName,

@@ -147,7 +147,7 @@ export interface NutritionCandidateDecision {
   candidateId: string | null
   confidence: NutritionConfidence
   reason: string
-  verifiedBy: "llm" | "deterministic" | "cache"
+  verifiedBy: "llm" | "deterministic" | "cache" | "override"
 }
 
 export interface NutritionLookupResult {
@@ -181,6 +181,7 @@ export interface IngredientMatch {
 export interface NutritionOverride {
   query?: string
   grams?: number
+  providerId?: string
 }
 
 export interface EstimateResult {

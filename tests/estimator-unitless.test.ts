@@ -138,4 +138,97 @@ describe("estimateRecipe unitless counts", () => {
       weightSource: "override",
     })
   })
+
+  it("uses an exact manual provider override without asking the LLM to arbitrate", async () => {
+    lookupOffCandidatesMock.mockResolvedValue([
+      {
+        id: "openfoodfacts:prepared",
+        nutrients: { ...nutrients, kcalPer100g: 70 },
+        productName: "Whole Wheat Rotini, prepared",
+        source: "openfoodfacts",
+        matchScore: 1,
+      },
+      {
+        id: "usda:dry",
+        nutrients: { ...nutrients, kcalPer100g: 352 },
+        productName: "Pasta, whole-wheat, dry",
+        source: "usda",
+        matchScore: 0.96,
+      },
+    ])
+    verifyNutritionCandidatesMock.mockResolvedValue(new Map())
+    const recipe: MealieRecipe = {
+      slug: "rotini-provider-override-test",
+      name: "Rotini Provider Override Test",
+      recipeYield: "8 servings",
+      recipeServings: 8,
+      nutrition: null,
+      tags: [],
+      extras: {
+        calorie_estimator_overrides: JSON.stringify({
+          rotini: {
+            query: "dry whole-wheat pasta",
+            grams: 454,
+            providerId: "usda:dry",
+          },
+        }),
+      },
+      recipeIngredient: [{
+        quantity: 1,
+        unit: null,
+        food: { id: "food-2", name: "rotini", pluralName: null, aliases: [] },
+        note: null,
+        display: "1 box rotini",
+        title: null,
+        originalText: "1 box rotini",
+      }],
+    }
+
+    const result = await estimateRecipe(recipe)
+
+    expect(verifyNutritionCandidatesMock).toHaveBeenCalledWith([])
+    expect(result.totalNutrients.kcalPer100g).toBeCloseTo(1598.08)
+    expect(result.matchedIngredients[0]).toMatchObject({
+      providerId: "usda:dry",
+      productName: "Pasta, whole-wheat, dry",
+      verifiedBy: "override",
+      confidence: "high",
+    })
+  })
+
+  it("fails closed when a manual provider ID is not in the structured candidates", async () => {
+    const recipe: MealieRecipe = {
+      slug: "missing-provider-override-test",
+      name: "Missing Provider Override Test",
+      recipeYield: "3 servings",
+      recipeServings: 3,
+      nutrition: null,
+      tags: [],
+      extras: {
+        calorie_estimator_overrides: JSON.stringify({
+          peppers: { grams: 360, providerId: "usda:not-returned" },
+        }),
+      },
+      recipeIngredient: [{
+        quantity: 3,
+        unit: null,
+        food: { id: "food-1", name: "peppers", pluralName: null, aliases: [] },
+        note: "diced",
+        display: "3 peppers, diced",
+        title: null,
+        originalText: "3 peppers, diced",
+      }],
+    }
+
+    const result = await estimateRecipe(recipe)
+
+    expect(estimateNutrientsMock).not.toHaveBeenCalled()
+    expect(result.matchedCount).toBe(0)
+    expect(result.unmatchedIngredients).toEqual(["peppers"])
+    expect(result.matchedIngredients[0]).toMatchObject({
+      matched: false,
+      verifiedBy: "override",
+      verificationReason: "Manual provider override was not found in current candidates",
+    })
+  })
 })

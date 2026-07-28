@@ -120,6 +120,8 @@ It's recommended to install it next to your Mealie instance using docker-compose
 | `LLM_BASE_URL` | `https://api.mistral.ai/v1` | LLM API base URL |
 | `LLM_ENDPOINT_URL` | `/chat/completions` | LLM API endpoint path (supports OpenAI-compatible providers) |
 | `LLM_MODEL` | `mistral-small-latest` | Model name |
+| `LLM_REASONING_EFFORT` | empty | Optional OpenRouter reasoning effort such as `minimal`; omitted when empty |
+| `LLM_REASONING_EXCLUDE` | `true` | Exclude reasoning text from the response while retaining configured reasoning |
 | `LLM_STRUCTURED_OUTPUTS` | `true` | Request schema-enforced JSON from compatible OpenAI-style endpoints |
 | `LLM_WEIGHT_MAX_TOKENS` | `64` | Output-token limit for unit and item weight estimates |
 | `LLM_NUTRIENT_MAX_TOKENS` | `256` | Output-token limit for nutrient estimates |
@@ -163,26 +165,36 @@ LLM never receives or returns recipe totals. Unit conversion, per-100-gram
 scaling, ingredient summation, and serving division are performed with
 fixed-point application code.
 
-Per-recipe canonical food or total-weight corrections can be stored in the
+Per-recipe canonical food, total-weight, or exact structured-source corrections can be stored in the
 recipe extra `calorie_estimator_overrides`:
 
 ```json
 {
-  "peppers": { "query": "bell peppers", "grams": 360 },
-  "pepper": { "query": "black pepper" },
-  "whole-wheat rotini": { "grams": 454 },
-  "cream": { "query": "heavy cream" }
+  "peppers": {
+    "query": "bell peppers",
+    "grams": 360,
+    "providerId": "openfoodfacts:0874896005735"
+  },
+  "pepper": { "query": "black pepper", "providerId": "usda:170931" },
+  "whole-wheat rotini": {
+    "query": "dry whole-wheat pasta",
+    "grams": 454,
+    "providerId": "usda:169738"
+  },
+  "cream": { "query": "heavy cream", "providerId": "usda:170859" }
 }
 ```
 
 Overrides are included in the recipe hash, preserved across estimator writes,
-and recorded as the lookup query and weight source in provenance.
+and recorded as the lookup query, weight source, provider ID, and verification
+method in provenance. A missing provider override fails closed instead of
+falling back to generated nutrient values.
 
 ## Motivation
 
 <!-- Add bit of context why the project has been created -->
 
-Mealie stores nutrition only when entered by hand. Maintaining that for every recipe is tedious, so this service fills the gap automatically from deterministic pantry data, Open Food Facts, optional USDA FoodData Central, and finally an optional LLM while leaving manual entries untouched.
+Mealie stores nutrition only when entered by hand. Maintaining that for every recipe is tedious, so this service fills the gap automatically from deterministic pantry data, Open Food Facts, and optional USDA FoodData Central. An optional LLM verifies structured-source identity and preparation state, but never supplies nutrition values or performs scaling, summation, or serving math. Manual entries remain untouched.
 
 ## Contributing
 

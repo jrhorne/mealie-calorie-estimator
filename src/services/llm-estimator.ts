@@ -211,7 +211,27 @@ function matchCacheKey(group: NutritionCandidateGroup): string {
     .map((candidate) => `${candidate.id}:${candidate.matchScore}`)
     .sort()
     .join("|")
-  return `${group.ingredient}|${group.lookupQuery ?? group.ingredient}|${signature}`
+  return [
+    "v2-source-quality",
+    config.llm.model,
+    group.ingredient,
+    group.lookupQuery ?? group.ingredient,
+    signature,
+  ].join("|")
+}
+
+function nutrientFieldCount(candidate: NutritionCandidate): number {
+  return Object.values(candidate.nutrients)
+    .filter((value) => value !== null && Number.isFinite(value))
+    .length
+}
+
+function applyReasoning(body: Record<string, unknown>): void {
+  if (!config.llm.reasoningEffort) return
+  body.reasoning = {
+    effort: config.llm.reasoningEffort,
+    exclude: config.llm.reasoningExclude,
+  }
 }
 
 function capMatchConfidence(
@@ -280,7 +300,8 @@ export async function verifyNutritionCandidates(
   }
 
   const prompt = [
-    "Select the candidate that represents each culinary ingredient, or reject all by returning an empty candidateId.",
+    "Select the structured-source candidate that represents each culinary ingredient and its preparation state, or reject all by returning an empty candidateId.",
+    "Prefer a matching candidate with complete standard nutrition fields. Reject cooked, prepared, composite, or different-variety records when the ingredient or lookup query requires another state.",
     "Only decide identity. Do not calculate, scale, sum, convert units, estimate servings, or provide nutrition values.",
     "Candidate IDs must be copied exactly from the supplied list.",
     JSON.stringify(
@@ -293,6 +314,8 @@ export async function verifyNutritionCandidates(
           source: candidate.source,
           dataType: candidate.dataType ?? null,
           lexicalScore: candidate.matchScore,
+          hasEnergy: candidate.nutrients.kcalPer100g !== null,
+          nutrientFieldCount: nutrientFieldCount(candidate),
         })),
       })),
     ),
@@ -306,6 +329,7 @@ export async function verifyNutritionCandidates(
       max_tokens: config.llm.matchMaxTokens,
     }
     if (config.llm.structuredOutputs) body.response_format = matchResponseFormat(pending)
+    applyReasoning(body)
 
     const response = await fetchLlm(body, "matches")
     if (!response?.ok) {
@@ -395,6 +419,7 @@ export async function estimateGrams(quantity: number, unitName: string, foodName
     if (config.llm.structuredOutputs) {
       body.response_format = weightResponseFormat
     }
+    applyReasoning(body)
 
     const res = await fetchLlm(body, "weight")
 
@@ -466,6 +491,7 @@ export async function estimateNutrients(foodName: string): Promise<NutrientSet |
     if (config.llm.structuredOutputs) {
       body.response_format = nutrientResponseFormat
     }
+    applyReasoning(body)
 
     const res = await fetchLlm(body, "nutrients")
 

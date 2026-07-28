@@ -88,7 +88,7 @@ export async function initCache(): Promise<void> {
     value TEXT NOT NULL
   )`)
 
-  const offCacheVersion = "v5-llm-candidate-verification"
+  const offCacheVersion = "v6-source-quality-and-provider-overrides"
   const versionStatement = db.prepare(
     "SELECT value FROM cache_metadata WHERE key = 'off_nutrient_units'",
   )

@@ -36,6 +36,8 @@ describe("estimateGrams", () => {
   it("returns grams from API and multiplies by quantity", async () => {
     config.llm.enabled = true
     config.llm.apiKey = "sk-test"
+    config.llm.reasoningEffort = "minimal"
+    config.llm.reasoningExclude = true
 
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -331,10 +333,14 @@ describe("verifyNutritionCandidates", () => {
     const body = JSON.parse(mockFetch.mock.calls[0][1].body)
     const prompt = body.messages[0].content as string
     expect(prompt).toContain("Do not calculate, scale, sum, convert units")
+    expect(prompt).toContain("preparation state")
+    expect(prompt).toContain("\"hasEnergy\":true")
+    expect(prompt).toContain("\"nutrientFieldCount\":11")
     expect(prompt).not.toContain("kcalPer100g")
     expect(prompt).not.toContain("sodiumPer100g")
     expect(body.response_format.json_schema.name).toBe("nutrition_source_matches")
     expect(body.max_tokens).toBe(1024)
+    expect(body.reasoning).toEqual({ effort: "minimal", exclude: true })
   })
 
   it("rejects a hallucinated candidate ID", async () => {
