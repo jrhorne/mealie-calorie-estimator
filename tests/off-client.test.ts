@@ -25,6 +25,8 @@ const MILK_NUTRIMENTS = {
   "carbohydrates_100g": 5,
   "fat_100g": 1.5,
   "saturated-fat_100g": 1,
+  "sodium_100g": 0.05,
+  "cholesterol_100g": 0.01,
 }
 
 describe("lookupNutrients", () => {
@@ -46,6 +48,8 @@ describe("lookupNutrients", () => {
 
     expect(result.matched).toBe(true)
     expect(result.nutrients?.kcalPer100g).toBe(48)
+    expect(result.nutrients?.sodiumPer100g).toBe(50)
+    expect(result.nutrients?.cholesterolPer100g).toBe(10)
     const calledUrl = fetchMock.mock.calls[0][0] as string
     expect(calledUrl).toContain("/search?")
     expect(calledUrl).toContain("q=Milch")
@@ -76,5 +80,18 @@ describe("lookupNutrients", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4)
     expect(result.matched).toBe(false)
     expect(result.nutrients).toBeNull()
+  })
+
+  it("uses deterministic milligram values for culinary salt", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+
+    const result = await lookupNutrients("salt")
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result.matched).toBe(true)
+    expect(result.nutrients).toMatchObject({
+      kcalPer100g: 0,
+      sodiumPer100g: 38_758,
+    })
   })
 })

@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest"
-import { computeIngredientHash, parseYield, buildNutritionPatch, hasManualCalories, buildManualAckPatch } from "../src/services/estimator.js"
+import {
+  buildManualAckPatch,
+  buildNutritionPatch,
+  computeIngredientHash,
+  estimateRecipe,
+  hasManualCalories,
+  parseYield,
+} from "../src/services/estimator.js"
 import type { MealieRecipe, EstimateResult, NutrientSet } from "../src/types.js"
 
 function makeRecipe(overrides: Partial<MealieRecipe> = {}): MealieRecipe {
@@ -136,6 +143,40 @@ describe("parseYield", () => {
     ["as needed", null],
   ])("returns null for '%s'", (input, expected) => {
     expect(parseYield(input)).toBe(expected)
+  })
+})
+
+describe("estimateRecipe", () => {
+  it("calculates plausible sodium for one teaspoon of salt", async () => {
+    const recipe = makeRecipe({
+      recipeYield: "8 servings",
+      recipeServings: 8,
+      recipeIngredient: [
+        {
+          quantity: 1,
+          unit: {
+            id: "teaspoon",
+            name: "teaspoon",
+            pluralName: "teaspoons",
+            abbreviation: "tsp",
+            standardQuantity: null,
+            standardUnit: null,
+          },
+          food: { id: "salt", name: "salt", pluralName: null, aliases: [] },
+          note: null,
+          display: "1 teaspoon salt",
+          title: null,
+          originalText: null,
+        },
+      ],
+    })
+
+    const result = await estimateRecipe(recipe)
+
+    expect(result.matchedCount).toBe(1)
+    expect(result.unmatchedCount).toBe(0)
+    expect(result.totalNutrients.sodiumPer100g).toBeCloseTo(1937.9)
+    expect(result.perServingNutrients.sodiumPer100g).toBe(242)
   })
 })
 

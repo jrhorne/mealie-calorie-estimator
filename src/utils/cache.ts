@@ -67,6 +67,32 @@ export async function initCache(): Promise<void> {
     updated_at INTEGER NOT NULL
   )`)
 
+  db.run(`CREATE TABLE IF NOT EXISTS cache_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  )`)
+
+  const offCacheVersion = "v2-milligram-micros"
+  const versionStatement = db.prepare(
+    "SELECT value FROM cache_metadata WHERE key = 'off_nutrient_units'",
+  )
+  let storedOffCacheVersion: string | undefined
+  try {
+    if (versionStatement.step()) {
+      storedOffCacheVersion = String(versionStatement.getAsObject().value)
+    }
+  } finally {
+    versionStatement.free()
+  }
+  if (storedOffCacheVersion !== offCacheVersion) {
+    db.run("DELETE FROM nutrient_cache")
+    db.run(
+      `INSERT INTO cache_metadata (key, value) VALUES ('off_nutrient_units', ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [offCacheVersion],
+    )
+  }
+
   const cutoff = Date.now() - config.openFoodFacts.cacheTtlMs
   db.run("DELETE FROM nutrient_cache WHERE updated_at < ?", [cutoff])
   db.run("DELETE FROM llm_estimate_cache WHERE updated_at < ?", [cutoff])

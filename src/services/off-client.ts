@@ -14,6 +14,37 @@ const OFF_NUTRIENT_FIELDS = ["product_name", "nutriments"].join(",")
 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504])
 
+const KNOWN_SALT_NAMES = new Set([
+  "salt",
+  "table salt",
+  "sea salt",
+  "kosher salt",
+  "fine salt",
+  "coarse salt",
+  "iodized salt",
+  "iodised salt",
+  "fleur de sel",
+])
+
+const TABLE_SALT_NUTRIENTS: NutrientSet = {
+  kcalPer100g: 0,
+  proteinPer100g: 0,
+  carbsPer100g: 0,
+  fatPer100g: 0,
+  saturatedFatPer100g: 0,
+  transFatPer100g: 0,
+  unsaturatedFatPer100g: 0,
+  fiberPer100g: 0,
+  sugarPer100g: 0,
+  sodiumPer100g: 38_758,
+  cholesterolPer100g: 0,
+}
+
+function knownNutrients(foodName: string): NutrientSet | null {
+  const normalized = foodName.toLowerCase().replace(/\s+/g, " ").trim()
+  return KNOWN_SALT_NAMES.has(normalized) ? { ...TABLE_SALT_NUTRIENTS } : null
+}
+
 async function fetchWithRetry(url: string, query: string): Promise<Response | null> {
   const { maxRetries, retryBackoffMs, userAgent } = config.openFoodFacts
   let lastResponse: Response | null = null
@@ -63,8 +94,8 @@ function extractNutrients(n: OffNutriments): NutrientSet {
     unsaturatedFatPer100g: unsaturated,
     fiberPer100g: n["fiber_100g"] ?? null,
     sugarPer100g: n["sugars_100g"] ?? null,
-    sodiumPer100g: n["sodium_100g"] ?? null,
-    cholesterolPer100g: n["cholesterol_100g"] ?? null,
+    sodiumPer100g: n["sodium_100g"] == null ? null : n["sodium_100g"] * 1000,
+    cholesterolPer100g: n["cholesterol_100g"] == null ? null : n["cholesterol_100g"] * 1000,
   }
 }
 
@@ -108,6 +139,12 @@ async function searchProduct(query: string): Promise<OffProduct | null> {
 }
 
 export async function lookupNutrients(foodName: string, unitName?: string): Promise<OffLookupResult> {
+  const known = knownNutrients(foodName)
+  if (known) {
+    logger.debug({ foodName }, "Known nutrient composition found")
+    return { nutrients: known, matched: true, productName: "Known composition: table salt" }
+  }
+
   const cached = getCachedNutrients(foodName)
   if (cached) {
     logger.debug({ foodName }, "Cache hit for food")
