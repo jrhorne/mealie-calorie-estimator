@@ -136,4 +136,18 @@ describe("lookupUsdaNutrients", () => {
     expect(result.matched).toBe(false)
     expect(result.nutrients).toBeNull()
   })
+
+  it("does not cache an empty provider response", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ foods: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    )
+
+    await lookupUsdaNutrients("temporary USDA miss regression")
+    await lookupUsdaNutrients("temporary USDA miss regression")
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
 })

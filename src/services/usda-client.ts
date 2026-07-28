@@ -151,7 +151,6 @@ export async function lookupUsdaCandidates(
 
   const foods = await search(foodName)
   if (foods.length === 0) {
-    setCachedProviderCandidates(cacheKey, [])
     return []
   }
 

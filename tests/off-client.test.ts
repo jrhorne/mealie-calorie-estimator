@@ -94,6 +94,20 @@ describe("lookupNutrients", () => {
     expect(result.nutrients).toBeNull()
   })
 
+  it("does not cache an empty provider response", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ hits: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    )
+
+    await lookupNutrients("temporary OFF miss regression")
+    await lookupNutrients("temporary OFF miss regression")
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it("uses deterministic milligram values for culinary salt", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
 

@@ -190,7 +190,6 @@ export async function lookupOffCandidates(
 
   if (products.length === 0) {
     logger.debug({ foodName }, "No OFF match found")
-    setCachedProviderCandidates(cacheKey, [])
     return []
   }
 
