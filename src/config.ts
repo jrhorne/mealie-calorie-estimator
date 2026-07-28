@@ -65,6 +65,7 @@ export const config = {
     structuredOutputs: (process.env.LLM_STRUCTURED_OUTPUTS || "true").toLowerCase() === "true",
     weightMaxTokens: parseInt(process.env.LLM_WEIGHT_MAX_TOKENS || "64", 10),
     nutrientMaxTokens: parseInt(process.env.LLM_NUTRIENT_MAX_TOKENS || "256", 10),
+    matchMaxTokens: parseInt(process.env.LLM_MATCH_MAX_TOKENS || "1024", 10),
   },
 
   estimate: {

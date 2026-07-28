@@ -1,13 +1,22 @@
 import crypto from "node:crypto"
 import type {
   MealieRecipe, IngredientMatch, EstimateResult, NutritionPatch,
-  NutrientSet, MealieNutrition,
+  NutrientSet, MealieNutrition, NutritionCandidate,
 } from "../types.js"
 import { config } from "../config.js"
 import { convertToGrams } from "./unit-converter.js"
-import { lookupNutrients } from "./off-client.js"
-import { lookupUsdaNutrients } from "./usda-client.js"
-import { estimateGrams, estimateNutrients } from "./llm-estimator.js"
+import { lookupOffCandidates } from "./off-client.js"
+import { lookupUsdaCandidates } from "./usda-client.js"
+import {
+  estimateGrams,
+  estimateNutrients,
+  verifyNutritionCandidates,
+} from "./llm-estimator.js"
+import {
+  addScaledNutrients,
+  divideNutrients,
+  emptyNutrients,
+} from "./nutrition-math.js"
 import { logger } from "../utils/logger.js"
 
 export function computeIngredientHash(recipe: MealieRecipe): string {
@@ -49,65 +58,18 @@ export function parseYield(recipeYield: string | null): number | null {
   return null
 }
 
-function emptyNutrients(): NutrientSet {
-  return {
-    kcalPer100g: null,
-    proteinPer100g: null,
-    carbsPer100g: null,
-    fatPer100g: null,
-    saturatedFatPer100g: null,
-    transFatPer100g: null,
-    unsaturatedFatPer100g: null,
-    fiberPer100g: null,
-    sugarPer100g: null,
-    sodiumPer100g: null,
-    cholesterolPer100g: null,
-  }
-}
-
-function addToTotal(total: NutrientSet, nutrients: NutrientSet, grams: number): NutrientSet {
-  const factor = grams / 100
-  const add = (a: number | null, b: number | null): number | null => {
-    if (a === null && b === null) return null
-    return (a ?? 0) + (b ?? 0) * factor
-  }
-
-  return {
-    kcalPer100g: add(total.kcalPer100g, nutrients.kcalPer100g),
-    proteinPer100g: add(total.proteinPer100g, nutrients.proteinPer100g),
-    carbsPer100g: add(total.carbsPer100g, nutrients.carbsPer100g),
-    fatPer100g: add(total.fatPer100g, nutrients.fatPer100g),
-    saturatedFatPer100g: add(total.saturatedFatPer100g, nutrients.saturatedFatPer100g),
-    transFatPer100g: add(total.transFatPer100g, nutrients.transFatPer100g),
-    unsaturatedFatPer100g: add(total.unsaturatedFatPer100g, nutrients.unsaturatedFatPer100g),
-    fiberPer100g: add(total.fiberPer100g, nutrients.fiberPer100g),
-    sugarPer100g: add(total.sugarPer100g, nutrients.sugarPer100g),
-    sodiumPer100g: add(total.sodiumPer100g, nutrients.sodiumPer100g),
-    cholesterolPer100g: add(total.cholesterolPer100g, nutrients.cholesterolPer100g),
-  }
-}
-
-function divideByServings(total: NutrientSet, servings: number): NutrientSet {
-  const div = (v: number | null): number | null => (v !== null ? Math.round(v / servings) : null)
-  return {
-    kcalPer100g: div(total.kcalPer100g),
-    proteinPer100g: div(total.proteinPer100g),
-    carbsPer100g: div(total.carbsPer100g),
-    fatPer100g: div(total.fatPer100g),
-    saturatedFatPer100g: div(total.saturatedFatPer100g),
-    transFatPer100g: div(total.transFatPer100g),
-    unsaturatedFatPer100g: div(total.unsaturatedFatPer100g),
-    fiberPer100g: div(total.fiberPer100g),
-    sugarPer100g: div(total.sugarPer100g),
-    sodiumPer100g: div(total.sodiumPer100g),
-    cholesterolPer100g: div(total.cholesterolPer100g),
-  }
-}
-
 export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResult> {
+  interface PreparedIngredient {
+    name: string
+    grams: number | null
+    weightSource: "unit-converter" | "llm"
+    candidates: NutritionCandidate[]
+  }
+
   const matchedIngredients: IngredientMatch[] = []
   const unmatchedNames: string[] = []
   let totalNutrients = emptyNutrients()
+  const preparedIngredients: PreparedIngredient[] = []
 
   for (const ing of recipe.recipeIngredient) {
     const foodName = ing.food?.name
@@ -118,17 +80,43 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
     }
 
     let grams = convertToGrams(quantity, ing.unit)
-    let llmEstimated = false
+    let weightSource: PreparedIngredient["weightSource"] = "unit-converter"
 
     if (grams === null) {
       const unitName = ing.unit?.name ?? "item"
       const llmGrams = await estimateGrams(quantity, unitName, foodName)
       if (llmGrams !== null) {
         grams = llmGrams
-        llmEstimated = true
+        weightSource = "llm"
       }
     }
 
+    if (grams === null) {
+      preparedIngredients.push({ name: foodName, grams: null, weightSource, candidates: [] })
+      continue
+    }
+
+    const offCandidates = await lookupOffCandidates(foodName, ing.unit?.name)
+    const candidates = offCandidates.some((candidate) => candidate.source === "known")
+      ? offCandidates
+      : [
+          ...offCandidates,
+          ...await lookupUsdaCandidates(foodName),
+        ].sort((left, right) => right.matchScore - left.matchScore).slice(0, 5)
+    preparedIngredients.push({ name: foodName, grams, weightSource, candidates })
+  }
+
+  const decisions = await verifyNutritionCandidates(
+    preparedIngredients
+      .filter((ingredient) => ingredient.grams !== null)
+      .map((ingredient) => ({
+        ingredient: ingredient.name,
+        candidates: ingredient.candidates,
+      })),
+  )
+
+  for (const ingredient of preparedIngredients) {
+    const { name: foodName, grams, weightSource, candidates } = ingredient
     if (grams === null) {
       unmatchedNames.push(foodName)
       matchedIngredients.push({
@@ -137,19 +125,20 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
         matched: false,
         nutrients: null,
         confidence: "low",
+        weightSource,
       })
       continue
     }
 
-    let result = await lookupNutrients(foodName, ing.unit?.name)
-    if (!result.matched || result.nutrients === null) {
-      result = await lookupUsdaNutrients(foodName)
-    }
+    const decision = decisions.get(foodName)
+    const candidate = decision?.candidateId
+      ? candidates.find((item) => item.id === decision.candidateId)
+      : undefined
 
-    if (!result.matched || result.nutrients === null) {
+    if (!candidate) {
       const llmNutrients = await estimateNutrients(foodName)
       if (llmNutrients !== null) {
-        totalNutrients = addToTotal(totalNutrients, llmNutrients, grams)
+        totalNutrients = addScaledNutrients(totalNutrients, llmNutrients, grams)
         matchedIngredients.push({
           name: foodName,
           grams,
@@ -158,6 +147,9 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
           llmEstimated: true,
           nutritionSource: "llm",
           confidence: "low",
+          verificationReason: decision?.reason ?? "No structured-source match",
+          verifiedBy: decision?.verifiedBy ?? "deterministic",
+          weightSource,
         })
         continue
       }
@@ -168,30 +160,35 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
         matched: false,
         nutrients: null,
         confidence: "low",
+        verificationReason: decision?.reason ?? "No structured-source match",
+        verifiedBy: decision?.verifiedBy ?? "deterministic",
+        weightSource,
       })
       continue
     }
 
-    totalNutrients = addToTotal(totalNutrients, result.nutrients, grams)
+    totalNutrients = addScaledNutrients(totalNutrients, candidate.nutrients, grams)
     matchedIngredients.push({
       name: foodName,
       grams,
       matched: true,
-      nutrients: result.nutrients,
-      llmEstimated,
-      nutritionSource: result.source,
-      confidence:
-        llmEstimated
-          ? "low"
-          : result.source === "known" || result.source === "usda"
-            ? "high"
-            : "medium",
-      productName: result.productName,
+      nutrients: candidate.nutrients,
+      llmEstimated: weightSource === "llm",
+      nutritionSource: candidate.source,
+      confidence: weightSource === "llm" ? "low" : decision?.confidence ?? "low",
+      productName: candidate.productName,
+      providerId: candidate.id,
+      matchScore: candidate.matchScore,
+      verificationReason: decision?.reason ?? null,
+      verifiedBy: decision?.verifiedBy ?? null,
+      weightSource,
     })
   }
 
   const servings = parseYield(recipe.recipeYield) ?? recipe.recipeServings
-  const perServingNutrients = servings && servings > 0 ? divideByServings(totalNutrients, servings) : emptyNutrients()
+  const perServingNutrients = servings && servings > 0
+    ? divideNutrients(totalNutrients, servings)
+    : emptyNutrients()
 
   const result: EstimateResult = {
     slug: recipe.slug,
@@ -244,7 +241,7 @@ export function buildManualAckPatch(recipe: MealieRecipe, hash: string): Nutriti
 }
 
 function n(v: number | null): string {
-  return v != null ? v.toString() : ""
+  return v != null ? Math.round(v).toString() : ""
 }
 
 export function buildNutritionPatch(
@@ -267,7 +264,15 @@ export function buildNutritionPatch(
         nutritionSource: ingredient.nutritionSource ?? null,
         confidence: ingredient.confidence ?? null,
         productName: ingredient.productName ?? null,
-        llmAssisted: ingredient.llmEstimated ?? false,
+        providerId: ingredient.providerId ?? null,
+        matchScore: ingredient.matchScore ?? null,
+        verificationReason: ingredient.verificationReason ?? null,
+        verifiedBy: ingredient.verifiedBy ?? null,
+        weightSource: ingredient.weightSource ?? null,
+        llmAssisted:
+          ingredient.llmEstimated === true
+          || ingredient.nutritionSource === "llm"
+          || ingredient.weightSource === "llm",
       })),
     ),
   }

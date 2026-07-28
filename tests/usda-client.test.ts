@@ -44,7 +44,7 @@ describe("lookupUsdaNutrients", () => {
       ),
     )
 
-    const result = await lookupUsdaNutrients("raw apple provider test")
+    const result = await lookupUsdaNutrients("raw apple")
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(result).toMatchObject({
@@ -74,5 +74,66 @@ describe("lookupUsdaNutrients", () => {
       source: "usda",
     })
     config.usda.apiKey = "test-usda-key"
+  })
+
+  it("rejects an unrelated first hit and selects the later matching food", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          foods: [
+            {
+              fdcId: 200,
+              description: "Bread, Italian",
+              dataType: "Survey (FNDDS)",
+              foodNutrients: [
+                { nutrientId: 1008, nutrientName: "Energy", unitName: "KCAL", value: 270 },
+              ],
+            },
+            {
+              fdcId: 201,
+              description: "Italian seasoning, dried herbs",
+              dataType: "Foundation",
+              foodNutrients: [
+                { nutrientId: 1008, nutrientName: "Energy", unitName: "KCAL", value: 250 },
+                { nutrientId: 1093, nutrientName: "Sodium", unitName: "MG", value: 50 },
+              ],
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    )
+
+    const result = await lookupUsdaNutrients("Italian seasoning")
+
+    expect(result).toMatchObject({
+      matched: true,
+      productName: "Italian seasoning, dried herbs",
+      providerId: "usda:201",
+      source: "usda",
+    })
+  })
+
+  it("falls through when every USDA hit is a different food type", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          foods: [{
+            fdcId: 300,
+            description: "Bagel, whole wheat",
+            dataType: "Survey (FNDDS)",
+            foodNutrients: [
+              { nutrientId: 1008, nutrientName: "Energy", unitName: "KCAL", value: 250 },
+            ],
+          }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    )
+
+    const result = await lookupUsdaNutrients("whole-wheat rotini regression")
+
+    expect(result.matched).toBe(false)
+    expect(result.nutrients).toBeNull()
   })
 })

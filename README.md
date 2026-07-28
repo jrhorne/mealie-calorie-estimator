@@ -115,7 +115,7 @@ It's recommended to install it next to your Mealie instance using docker-compose
 | `USDA_TIMEOUT_MS` | `15000` | Timeout for a USDA request |
 | `USDA_MAX_RETRIES` | `2` | Retries for transient USDA errors (429/5xx) |
 | `USDA_RETRY_BACKOFF_MS` | `500` | Base USDA retry backoff |
-| `LLM_ENABLED` | `false` | Enable LLM fallback for custom units and unmatched foods |
+| `LLM_ENABLED` | `false` | Enable batched source-identity verification plus fallback for custom units and unmatched foods |
 | `LLM_API_KEY` | — | API key for OpenAI-compatible endpoint |
 | `LLM_BASE_URL` | `https://api.mistral.ai/v1` | LLM API base URL |
 | `LLM_ENDPOINT_URL` | `/chat/completions` | LLM API endpoint path (supports OpenAI-compatible providers) |
@@ -123,6 +123,7 @@ It's recommended to install it next to your Mealie instance using docker-compose
 | `LLM_STRUCTURED_OUTPUTS` | `true` | Request schema-enforced JSON from compatible OpenAI-style endpoints |
 | `LLM_WEIGHT_MAX_TOKENS` | `64` | Output-token limit for unit and item weight estimates |
 | `LLM_NUTRIENT_MAX_TOKENS` | `256` | Output-token limit for nutrient estimates |
+| `LLM_MATCH_MAX_TOKENS` | `1024` | Output-token limit for the recipe-level source matching decision |
 | `ESTIMATE_STRATEGY` | `all` | Estimation strategy: `all` (estimate every recipe) or `tagged` (only estimate recipes with the `ESTIMATE_TAG` tag) |
 | `ESTIMATE_TAG` | `estimate` | Tag name to check when `ESTIMATE_STRATEGY=tagged` |
 | `PORT` | `8000` | Server port |
@@ -146,8 +147,18 @@ See [`.env.example`](./.env.example) for the full list, including rate-limit and
 |---|---|---|
 | `GET` | `/health` | Health check |
 | `POST` | `/webhook` | Apprise webhook for recipe created/updated events |
-| `POST` | `/estimate` | On-demand estimation for a single recipe |
+| `POST` | `/estimate` | Backward-compatible asynchronous estimation and apply |
+| `POST` | `/estimate/preview` | Calculate a single recipe and return provenance without writing to Mealie |
+| `POST` | `/estimate/apply` | Calculate, apply, and return the exact result written to Mealie |
 | `POST` | `/backfill` | Estimate nutrition for all existing recipes |
+
+Structured providers are treated as nutrient observations, not automatic
+identity matches. The service ranks Open Food Facts and USDA candidates, sends
+only ingredient and candidate identity metadata to one schema-constrained LLM
+call per recipe, and accepts only a candidate ID from the supplied list. The
+LLM never receives or returns recipe totals. Unit conversion, per-100-gram
+scaling, ingredient summation, and serving division are performed with
+fixed-point application code.
 
 ## Motivation
 

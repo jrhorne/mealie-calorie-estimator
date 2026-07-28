@@ -74,6 +74,7 @@ export interface OffSearchResult {
 }
 
 export interface OffProduct {
+  code?: string
   product_name: string
   nutriments?: OffNutriments
   nutriscore_grade?: string
@@ -126,11 +127,37 @@ export interface NutrientSet {
 export type NutritionSource = "known" | "openfoodfacts" | "usda" | "llm"
 export type NutritionConfidence = "high" | "medium" | "low"
 
+export interface NutritionCandidate {
+  id: string
+  nutrients: NutrientSet
+  productName: string
+  source: Exclude<NutritionSource, "llm">
+  matchScore: number
+  dataType?: string
+}
+
+export interface NutritionCandidateGroup {
+  ingredient: string
+  candidates: NutritionCandidate[]
+}
+
+export interface NutritionCandidateDecision {
+  ingredient: string
+  candidateId: string | null
+  confidence: NutritionConfidence
+  reason: string
+  verifiedBy: "llm" | "deterministic" | "cache"
+}
+
 export interface NutritionLookupResult {
   nutrients: NutrientSet | null
   matched: boolean
   productName: string | null
   source: Exclude<NutritionSource, "llm">
+  providerId?: string
+  matchScore?: number
+  confidence?: NutritionConfidence
+  dataType?: string
 }
 
 export interface IngredientMatch {
@@ -142,6 +169,11 @@ export interface IngredientMatch {
   nutritionSource?: NutritionSource
   confidence?: NutritionConfidence
   productName?: string | null
+  providerId?: string | null
+  matchScore?: number | null
+  verificationReason?: string | null
+  verifiedBy?: NutritionCandidateDecision["verifiedBy"] | null
+  weightSource?: "unit-converter" | "llm"
 }
 
 export interface EstimateResult {

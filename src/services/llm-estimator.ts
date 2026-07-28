@@ -1,8 +1,21 @@
 import { config } from "../config.js"
 import { logger } from "../utils/logger.js"
-import { getCachedLlmEstimate, setCachedLlmEstimate, getCachedLlmNutrients, setCachedLlmNutrients } from "../utils/cache.js"
+import {
+  getCachedLlmEstimate,
+  getCachedLlmMatch,
+  getCachedLlmNutrients,
+  setCachedLlmEstimate,
+  setCachedLlmMatch,
+  setCachedLlmNutrients,
+} from "../utils/cache.js"
 import { waitForRateLimit, RateLimitType } from "../utils/rate-limiter.js"
-import type { NutrientSet } from "../types.js"
+import type {
+  NutritionCandidate,
+  NutritionCandidateDecision,
+  NutritionCandidateGroup,
+  NutritionConfidence,
+  NutrientSet,
+} from "../types.js"
 
 interface LlmUsage {
   prompt_tokens?: number
@@ -66,6 +79,40 @@ const nutrientResponseFormat = {
   },
 }
 
+function matchResponseFormat(groups: NutritionCandidateGroup[]): Record<string, unknown> {
+  return {
+    type: "json_schema",
+    json_schema: {
+      name: "nutrition_source_matches",
+      strict: true,
+      schema: {
+        type: "object",
+        properties: {
+          decisions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                ingredient: {
+                  type: "string",
+                  enum: groups.map((group) => group.ingredient),
+                },
+                candidateId: { type: "string" },
+                confidence: { type: "string", enum: ["high", "medium", "low"] },
+                reason: { type: "string" },
+              },
+              required: ["ingredient", "candidateId", "confidence", "reason"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["decisions"],
+        additionalProperties: false,
+      },
+    },
+  }
+}
+
 function endpointUrl(): string {
   return `${config.llm.baseUrl.replace(/\/+$/, "")}/${config.llm.endpointUrl.replace(/^\/+/, "")}`
 }
@@ -91,7 +138,11 @@ function hasMeaningfulNutrients(nutrients: NutrientSet): boolean {
   return Object.values(nutrients).some((value) => value !== null && value > 0)
 }
 
-function logCompletion(data: LlmResponse, estimateType: "weight" | "nutrients", foodName: string): void {
+function logCompletion(
+  data: LlmResponse,
+  estimateType: "weight" | "nutrients" | "matches",
+  foodName: string,
+): void {
   logger.info(
     {
       estimateType,
@@ -108,6 +159,176 @@ function logCompletion(data: LlmResponse, estimateType: "weight" | "nutrients", 
   )
 }
 
+function matchCacheKey(group: NutritionCandidateGroup): string {
+  const signature = group.candidates
+    .map((candidate) => `${candidate.id}:${candidate.matchScore}`)
+    .sort()
+    .join("|")
+  return `${group.ingredient}|${signature}`
+}
+
+function capMatchConfidence(
+  requested: NutritionConfidence,
+  candidate: NutritionCandidate,
+): NutritionConfidence {
+  if (requested === "low" || candidate.matchScore < 0.65) return "low"
+  if (requested === "medium" || candidate.matchScore < 0.9) return "medium"
+  return "high"
+}
+
+function deterministicDecision(group: NutritionCandidateGroup): NutritionCandidateDecision {
+  const candidate = [...group.candidates].sort(
+    (left, right) => right.matchScore - left.matchScore,
+  )[0]
+  if (candidate && candidate.matchScore >= 0.95) {
+    return {
+      ingredient: group.ingredient,
+      candidateId: candidate.id,
+      confidence: "high",
+      reason: "Exact deterministic identity match",
+      verifiedBy: "deterministic",
+    }
+  }
+  return {
+    ingredient: group.ingredient,
+    candidateId: null,
+    confidence: "low",
+    reason: "No LLM verification and no exact deterministic identity match",
+    verifiedBy: "deterministic",
+  }
+}
+
+export async function verifyNutritionCandidates(
+  groups: NutritionCandidateGroup[],
+): Promise<Map<string, NutritionCandidateDecision>> {
+  const decisions = new Map<string, NutritionCandidateDecision>()
+  const pending: NutritionCandidateGroup[] = []
+
+  for (const group of groups) {
+    if (group.candidates.length === 0) {
+      decisions.set(group.ingredient, {
+        ingredient: group.ingredient,
+        candidateId: null,
+        confidence: "low",
+        reason: "No plausible structured-source candidates",
+        verifiedBy: "deterministic",
+      })
+      continue
+    }
+    const cached = getCachedLlmMatch(matchCacheKey(group))
+    if (cached) {
+      decisions.set(group.ingredient, { ...cached, verifiedBy: "cache" })
+    } else {
+      pending.push(group)
+    }
+  }
+
+  if (pending.length === 0) return decisions
+
+  if (!config.llm.enabled || !config.llm.apiKey) {
+    for (const group of pending) {
+      decisions.set(group.ingredient, deterministicDecision(group))
+    }
+    return decisions
+  }
+
+  const prompt = [
+    "Select the candidate that represents each culinary ingredient, or reject all by returning an empty candidateId.",
+    "Only decide identity. Do not calculate, scale, sum, convert units, estimate servings, or provide nutrition values.",
+    "Candidate IDs must be copied exactly from the supplied list.",
+    JSON.stringify(
+      pending.map((group) => ({
+        ingredient: group.ingredient,
+        candidates: group.candidates.map((candidate) => ({
+          candidateId: candidate.id,
+          name: candidate.productName,
+          source: candidate.source,
+          dataType: candidate.dataType ?? null,
+          lexicalScore: candidate.matchScore,
+        })),
+      })),
+    ),
+  ].join("\n")
+
+  try {
+    await waitForRateLimit(RateLimitType.Llm)
+    const body: Record<string, unknown> = {
+      model: config.llm.model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0,
+      max_tokens: config.llm.matchMaxTokens,
+    }
+    if (config.llm.structuredOutputs) body.response_format = matchResponseFormat(pending)
+
+    const response = await fetch(endpointUrl(), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.llm.apiKey}`,
+      },
+      body: JSON.stringify(body),
+    })
+    if (!response.ok) {
+      logger.warn({ status: response.status }, "LLM candidate verification returned error")
+      for (const group of pending) {
+        decisions.set(group.ingredient, deterministicDecision(group))
+      }
+      return decisions
+    }
+
+    const data = await response.json() as LlmResponse
+    const content = extractContent(data)
+    logCompletion(data, "matches", `${pending.length} ingredients`)
+    if (!content) throw new Error("LLM candidate verification returned empty content")
+
+    const parsed = parseJson(content)
+    const returned = Array.isArray(parsed.decisions)
+      ? parsed.decisions as Array<Record<string, unknown>>
+      : []
+
+    for (const group of pending) {
+      const raw = returned.find((item) => item.ingredient === group.ingredient)
+      const requestedId = typeof raw?.candidateId === "string"
+        ? raw.candidateId.trim()
+        : ""
+      const candidate = group.candidates.find((item) => item.id === requestedId)
+      const rawConfidence = raw?.confidence === "high" || raw?.confidence === "medium"
+        ? raw.confidence
+        : "low"
+      const decision: NutritionCandidateDecision = candidate
+        ? {
+            ingredient: group.ingredient,
+            candidateId: candidate.id,
+            confidence: capMatchConfidence(rawConfidence, candidate),
+            reason: typeof raw?.reason === "string"
+              ? raw.reason.slice(0, 500)
+              : "LLM selected candidate without a reason",
+            verifiedBy: "llm",
+          }
+        : {
+            ingredient: group.ingredient,
+            candidateId: null,
+            confidence: "low",
+            reason: requestedId
+              ? "LLM returned an unknown candidate ID"
+              : typeof raw?.reason === "string"
+                ? raw.reason.slice(0, 500)
+                : "LLM rejected all candidates",
+            verifiedBy: "llm",
+          }
+      decisions.set(group.ingredient, decision)
+      setCachedLlmMatch(matchCacheKey(group), decision)
+    }
+  } catch (error) {
+    logger.warn({ error }, "LLM candidate verification failed")
+    for (const group of pending) {
+      decisions.set(group.ingredient, deterministicDecision(group))
+    }
+  }
+
+  return decisions
+}
+
 export async function estimateGrams(quantity: number, unitName: string, foodName: string): Promise<number | null> {
   if (!config.llm.enabled) return null
   if (!config.llm.apiKey) {
@@ -122,7 +343,7 @@ export async function estimateGrams(quantity: number, unitName: string, foodName
     return totalGrams
   }
 
-  const prompt = `Estimate the typical weight in grams for 1 ${unitName} of "${foodName}". For "item", use the typical edible weight of one whole item. Consider typical packaging sizes and food densities. Return 0 only when a reasonable estimate is impossible.`
+  const prompt = `Estimate only the typical weight in grams for exactly 1 ${unitName} of "${foodName}". For "item", use the typical edible weight of one whole item. Do not multiply by recipe quantity and do not calculate nutrition. Return 0 only when a reasonable estimate is impossible.`
 
   try {
     await waitForRateLimit(RateLimitType.Llm)

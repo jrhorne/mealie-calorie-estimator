@@ -176,7 +176,7 @@ describe("estimateRecipe", () => {
     expect(result.matchedCount).toBe(1)
     expect(result.unmatchedCount).toBe(0)
     expect(result.totalNutrients.sodiumPer100g).toBeCloseTo(1937.9)
-    expect(result.perServingNutrients.sodiumPer100g).toBe(242)
+    expect(result.perServingNutrients.sodiumPer100g).toBeCloseTo(242.2375)
   })
 })
 
@@ -256,6 +256,11 @@ describe("buildNutritionPatch", () => {
         nutritionSource: "known",
         confidence: "high",
         productName: "Known composition: table salt",
+        providerId: null,
+        matchScore: null,
+        verificationReason: null,
+        verifiedBy: null,
+        weightSource: null,
         llmAssisted: false,
       },
     ])

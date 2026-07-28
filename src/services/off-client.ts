@@ -1,8 +1,14 @@
 import { config } from "../config.js"
 import { logger } from "../utils/logger.js"
-import { getCachedNutrients, setCachedNutrients } from "../utils/cache.js"
+import {
+  getCachedNutrients,
+  getCachedProviderCandidates,
+  setCachedProviderCandidates,
+} from "../utils/cache.js"
+import { foodMatchIsPlausible, scoreFoodMatch } from "../utils/food-match.js"
 import { waitForRateLimit, RateLimitType } from "../utils/rate-limiter.js"
 import type {
+  NutritionCandidate,
   NutritionLookupResult,
   OffNutriments,
   OffProduct,
@@ -10,7 +16,7 @@ import type {
   NutrientSet,
 } from "../types.js"
 
-const OFF_NUTRIENT_FIELDS = ["product_name", "nutriments"].join(",")
+const OFF_NUTRIENT_FIELDS = ["code", "product_name", "nutriments"].join(",")
 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504])
 
@@ -43,24 +49,6 @@ const TABLE_SALT_NUTRIENTS: NutrientSet = {
 function knownNutrients(foodName: string): NutrientSet | null {
   const normalized = foodName.toLowerCase().replace(/\s+/g, " ").trim()
   return KNOWN_SALT_NAMES.has(normalized) ? { ...TABLE_SALT_NUTRIENTS } : null
-}
-
-function significantTokens(value: string): Set<string> {
-  return new Set(
-    value
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, " ")
-      .split(/\s+/)
-      .map((token) => token.replace(/s$/, ""))
-      .filter((token) => token.length >= 3),
-  )
-}
-
-function productNameMatchesQuery(query: string, productName: string | undefined): boolean {
-  if (!productName) return false
-  const queryTokens = significantTokens(query)
-  const productTokens = significantTokens(productName)
-  return [...queryTokens].some((token) => productTokens.has(token))
 }
 
 async function fetchWithRetry(url: string, query: string): Promise<Response | null> {
@@ -117,11 +105,11 @@ function extractNutrients(n: OffNutriments): NutrientSet {
   }
 }
 
-async function searchProduct(query: string): Promise<OffProduct | null> {
+async function searchProducts(query: string): Promise<OffProduct[]> {
   const params = new URLSearchParams({
     q: query,
     langs: config.openFoodFacts.language,
-    page_size: "1",
+    page_size: "5",
     fields: OFF_NUTRIENT_FIELDS,
   })
 
@@ -133,12 +121,12 @@ async function searchProduct(query: string): Promise<OffProduct | null> {
 
   if (!res) {
     logger.warn({ query }, "OFF search failed after retries")
-    return null
+    return []
   }
 
   if (!res.ok) {
     logger.warn({ status: res.status, query }, "OFF search returned error")
-    return null
+    return []
   }
 
   let data: OffSearchResult
@@ -146,41 +134,31 @@ async function searchProduct(query: string): Promise<OffProduct | null> {
     data = (await res.json()) as OffSearchResult
   } catch {
     logger.warn({ query }, "OFF returned non-JSON response")
-    return null
+    return []
   }
 
   if (!data.hits || data.hits.length === 0) {
-    return null
+    return []
   }
 
-  return data.hits[0]
+  return data.hits
 }
 
-export async function lookupNutrients(
+export async function lookupOffCandidates(
   foodName: string,
   unitName?: string,
-): Promise<NutritionLookupResult> {
+): Promise<NutritionCandidate[]> {
   const known = knownNutrients(foodName)
   if (known) {
     logger.debug({ foodName }, "Known nutrient composition found")
-    return {
+    return [{
+      id: "known:table-salt",
       nutrients: known,
-      matched: true,
       productName: "Known composition: table salt",
       source: "known",
-    }
-  }
-
-  const cacheKey = `openfoodfacts:${foodName}`
-  const cached = getCachedNutrients(cacheKey)
-  if (cached) {
-    logger.debug({ foodName }, "Cache hit for food")
-    return {
-      nutrients: cached,
-      matched: true,
-      productName: foodName,
-      source: "openfoodfacts",
-    }
+      matchScore: 1,
+      dataType: "known",
+    }]
   }
 
   let searchTerm = foodName
@@ -188,10 +166,70 @@ export async function lookupNutrients(
     searchTerm = searchTerm.slice(unitName.length).trim()
   }
 
-  const product = await searchProduct(searchTerm)
+  const cacheKey = `openfoodfacts:${searchTerm}`
+  const cachedCandidates = getCachedProviderCandidates(cacheKey)
+  if (cachedCandidates) {
+    logger.debug({ foodName }, "OFF candidate cache hit")
+    return cachedCandidates
+  }
 
-  if (!product) {
+  const cached = getCachedNutrients(cacheKey)
+  if (cached) {
+    logger.debug({ foodName }, "Legacy OFF nutrient cache hit")
+    return [{
+      id: `openfoodfacts:legacy:${searchTerm.toLowerCase()}`,
+      nutrients: cached,
+      productName: searchTerm,
+      source: "openfoodfacts",
+      matchScore: 1,
+      dataType: "legacy-cache",
+    }]
+  }
+
+  const products = await searchProducts(searchTerm)
+
+  if (products.length === 0) {
     logger.debug({ foodName }, "No OFF match found")
+    setCachedProviderCandidates(cacheKey, [])
+    return []
+  }
+
+  const candidates: NutritionCandidate[] = []
+  for (const [index, product] of products.entries()) {
+    if (!product.nutriments || !product.product_name) continue
+    const nutrients = extractNutrients(product.nutriments)
+    if (nutrients.kcalPer100g === null) continue
+    const matchScore = scoreFoodMatch(searchTerm, product.product_name)
+    if (!foodMatchIsPlausible(matchScore)) {
+      logger.debug(
+        { foodName, searchTerm, product: product.product_name, matchScore },
+        "Rejected unrelated OFF product candidate",
+      )
+      continue
+    }
+    candidates.push({
+      id: `openfoodfacts:${product.code ?? `${product.product_name}:${index}`}`,
+      nutrients,
+      productName: product.product_name,
+      source: "openfoodfacts",
+      matchScore,
+      dataType: "branded",
+    })
+  }
+
+  candidates.sort((left, right) => right.matchScore - left.matchScore)
+  const limited = candidates.slice(0, 3)
+  setCachedProviderCandidates(cacheKey, limited)
+  return limited
+}
+
+export async function lookupNutrients(
+  foodName: string,
+  unitName?: string,
+): Promise<NutritionLookupResult> {
+  const candidates = await lookupOffCandidates(foodName, unitName)
+  const candidate = candidates[0]
+  if (!candidate) {
     return {
       nutrients: null,
       matched: false,
@@ -199,48 +237,13 @@ export async function lookupNutrients(
       source: "openfoodfacts",
     }
   }
-
-  if (!product.nutriments) {
-    logger.debug({ foodName, product: product.product_name }, "OFF match has no nutrient data")
-    return {
-      nutrients: null,
-      matched: false,
-      productName: product.product_name,
-      source: "openfoodfacts",
-    }
-  }
-
-  if (!productNameMatchesQuery(searchTerm, product.product_name)) {
-    logger.debug(
-      { foodName, searchTerm, product: product.product_name },
-      "Rejected unrelated OFF product match",
-    )
-    return {
-      nutrients: null,
-      matched: false,
-      productName: product.product_name,
-      source: "openfoodfacts",
-    }
-  }
-
-  const nutrients = extractNutrients(product.nutriments)
-
-  if (nutrients.kcalPer100g === null) {
-    logger.debug({ foodName, product: product.product_name }, "OFF match has no kcal data")
-    return {
-      nutrients: null,
-      matched: false,
-      productName: product.product_name,
-      source: "openfoodfacts",
-    }
-  }
-
-  logger.debug({ foodName, product: product.product_name }, "OFF match found")
-  setCachedNutrients(cacheKey, nutrients)
   return {
-    nutrients,
+    nutrients: candidate.nutrients,
     matched: true,
-    productName: product.product_name,
-    source: "openfoodfacts",
+    productName: candidate.productName,
+    source: candidate.source,
+    providerId: candidate.id,
+    matchScore: candidate.matchScore,
+    dataType: candidate.dataType,
   }
 }

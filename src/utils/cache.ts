@@ -2,7 +2,11 @@ import initSqlJs, { type Database } from "sql.js"
 import fs from "node:fs"
 import path from "node:path"
 import { config } from "../config.js"
-import type { NutrientSet } from "../types.js"
+import type {
+  NutrientSet,
+  NutritionCandidate,
+  NutritionCandidateDecision,
+} from "../types.js"
 import { logger } from "./logger.js"
 
 let db: Database
@@ -67,12 +71,24 @@ export async function initCache(): Promise<void> {
     updated_at INTEGER NOT NULL
   )`)
 
+  db.run(`CREATE TABLE IF NOT EXISTS provider_lookup_cache (
+    lookup_key TEXT PRIMARY KEY,
+    result TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`)
+
+  db.run(`CREATE TABLE IF NOT EXISTS llm_match_cache (
+    lookup_key TEXT PRIMARY KEY,
+    decision TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`)
+
   db.run(`CREATE TABLE IF NOT EXISTS cache_metadata (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   )`)
 
-  const offCacheVersion = "v4-product-name-validation"
+  const offCacheVersion = "v5-llm-candidate-verification"
   const versionStatement = db.prepare(
     "SELECT value FROM cache_metadata WHERE key = 'off_nutrient_units'",
   )
@@ -86,6 +102,8 @@ export async function initCache(): Promise<void> {
   }
   if (storedOffCacheVersion !== offCacheVersion) {
     db.run("DELETE FROM nutrient_cache")
+    db.run("DELETE FROM provider_lookup_cache")
+    db.run("DELETE FROM llm_match_cache")
     db.run(
       `INSERT INTO cache_metadata (key, value) VALUES ('off_nutrient_units', ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
@@ -95,6 +113,8 @@ export async function initCache(): Promise<void> {
 
   const cutoff = Date.now() - config.openFoodFacts.cacheTtlMs
   db.run("DELETE FROM nutrient_cache WHERE updated_at < ?", [cutoff])
+  db.run("DELETE FROM provider_lookup_cache WHERE updated_at < ?", [cutoff])
+  db.run("DELETE FROM llm_match_cache WHERE updated_at < ?", [cutoff])
   db.run("DELETE FROM llm_estimate_cache WHERE updated_at < ?", [cutoff])
   db.run("DELETE FROM llm_nutrient_cache WHERE updated_at < ?", [cutoff])
 
@@ -156,6 +176,64 @@ export function setCachedNutrients(foodName: string, nutrients: NutrientSet): vo
   upsert("nutrient_cache", "food_name", key, "nutrients", JSON.stringify(nutrients))
 }
 
+export function getCachedProviderCandidates(
+  lookupKey: string,
+): NutritionCandidate[] | undefined {
+  if (!isInitialized) return undefined
+  const key = normalizeKey(lookupKey)
+  const raw = getRow<string>("provider_lookup_cache", "lookup_key", key, "result")
+  if (raw === undefined) return undefined
+  try {
+    return JSON.parse(raw) as NutritionCandidate[]
+  } catch {
+    return undefined
+  }
+}
+
+export function setCachedProviderCandidates(
+  lookupKey: string,
+  candidates: NutritionCandidate[],
+): void {
+  if (!isInitialized) return
+  const key = normalizeKey(lookupKey)
+  upsert(
+    "provider_lookup_cache",
+    "lookup_key",
+    key,
+    "result",
+    JSON.stringify(candidates),
+  )
+}
+
+export function getCachedLlmMatch(
+  lookupKey: string,
+): NutritionCandidateDecision | undefined {
+  if (!isInitialized) return undefined
+  const key = normalizeKey(lookupKey)
+  const raw = getRow<string>("llm_match_cache", "lookup_key", key, "decision")
+  if (raw === undefined) return undefined
+  try {
+    return JSON.parse(raw) as NutritionCandidateDecision
+  } catch {
+    return undefined
+  }
+}
+
+export function setCachedLlmMatch(
+  lookupKey: string,
+  decision: NutritionCandidateDecision,
+): void {
+  if (!isInitialized) return
+  const key = normalizeKey(lookupKey)
+  upsert(
+    "llm_match_cache",
+    "lookup_key",
+    key,
+    "decision",
+    JSON.stringify(decision),
+  )
+}
+
 export function isUnmatchedFood(foodName: string): boolean {
   const key = normalizeKey(foodName)
   return getRow<string>("unmatched_foods", "food_name", key, "food_name") !== undefined
@@ -190,6 +268,7 @@ export function setCachedLlmEstimate(unitName: string, foodName: string, grams: 
 export function clearLlmCache(): void {
   db.run("DELETE FROM llm_estimate_cache")
   db.run("DELETE FROM llm_nutrient_cache")
+  db.run("DELETE FROM llm_match_cache")
   scheduleSave()
 }
 

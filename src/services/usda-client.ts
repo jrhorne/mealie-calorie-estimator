@@ -1,6 +1,14 @@
 import { config } from "../config.js"
-import type { NutritionLookupResult, NutrientSet } from "../types.js"
-import { getCachedNutrients, setCachedNutrients } from "../utils/cache.js"
+import type {
+  NutritionCandidate,
+  NutritionLookupResult,
+  NutrientSet,
+} from "../types.js"
+import {
+  getCachedProviderCandidates,
+  setCachedProviderCandidates,
+} from "../utils/cache.js"
+import { foodMatchIsPlausible, scoreFoodMatch } from "../utils/food-match.js"
 import { logger } from "../utils/logger.js"
 import { RateLimitType, waitForRateLimit } from "../utils/rate-limiter.js"
 
@@ -92,11 +100,11 @@ function hasMeaningfulNutrients(nutrients: NutrientSet): boolean {
   return Object.values(nutrients).some((value) => value !== null && value > 0)
 }
 
-async function search(foodName: string): Promise<UsdaFood | null> {
+async function search(foodName: string): Promise<UsdaFood[]> {
   const params = new URLSearchParams({
     api_key: config.usda.apiKey,
     query: foodName,
-    pageSize: "5",
+    pageSize: "10",
     dataType: "Foundation,SR Legacy,Survey (FNDDS)",
   })
   const url = `${config.usda.baseUrl.replace(/\/+$/, "")}/foods/search?${params}`
@@ -118,67 +126,94 @@ async function search(foodName: string): Promise<UsdaFood | null> {
           continue
         }
         logger.warn({ foodName, status: response.status }, "USDA search returned error")
-        return null
+        return []
       }
       const data = (await response.json()) as UsdaSearchResponse
-      return data.foods?.find((food) => food.foodNutrients?.length) ?? null
+      return data.foods ?? []
     } catch (error) {
       if (attempt === config.usda.maxRetries) {
         logger.warn({ foodName, error }, "USDA search failed")
-        return null
+        return []
       }
     }
   }
-  return null
+  return []
+}
+
+export async function lookupUsdaCandidates(
+  foodName: string,
+): Promise<NutritionCandidate[]> {
+  if (!config.usda.apiKey) return []
+
+  const cacheKey = `usda:${foodName}`
+  const cached = getCachedProviderCandidates(cacheKey)
+  if (cached) return cached
+
+  const foods = await search(foodName)
+  if (foods.length === 0) {
+    setCachedProviderCandidates(cacheKey, [])
+    return []
+  }
+
+  const candidates: NutritionCandidate[] = []
+  for (const food of foods) {
+    if (!food.foodNutrients?.length) continue
+    const nutrients = extractNutrients(food)
+    if (!hasMeaningfulNutrients(nutrients)) continue
+    const matchScore = scoreFoodMatch(foodName, food.description, food.dataType)
+    if (!foodMatchIsPlausible(matchScore)) {
+      logger.debug(
+        {
+          foodName,
+          product: food.description,
+          fdcId: food.fdcId,
+          dataType: food.dataType,
+          matchScore,
+        },
+        "Rejected unrelated USDA candidate",
+      )
+      continue
+    }
+    candidates.push({
+      id: `usda:${food.fdcId}`,
+      nutrients,
+      productName: food.description,
+      source: "usda",
+      matchScore,
+      dataType: food.dataType,
+    })
+  }
+
+  candidates.sort((left, right) => right.matchScore - left.matchScore)
+  const limited = candidates.slice(0, 3)
+  setCachedProviderCandidates(cacheKey, limited)
+  logger.info({
+    foodName,
+    candidates: limited.map((candidate) => ({
+      id: candidate.id,
+      product: candidate.productName,
+      dataType: candidate.dataType,
+      matchScore: candidate.matchScore,
+    })),
+  }, "USDA candidates found")
+  return limited
 }
 
 export async function lookupUsdaNutrients(
   foodName: string,
 ): Promise<NutritionLookupResult> {
-  if (!config.usda.apiKey) {
+  const candidates = await lookupUsdaCandidates(foodName)
+  const candidate = candidates[0]
+  if (!candidate) {
     return { nutrients: null, matched: false, productName: null, source: "usda" }
   }
-
-  const cacheKey = `usda:${foodName}`
-  const cached = getCachedNutrients(cacheKey)
-  if (cached) {
-    return {
-      nutrients: cached,
-      matched: true,
-      productName: foodName,
-      source: "usda",
-    }
-  }
-
-  const food = await search(foodName)
-  if (!food) {
-    return { nutrients: null, matched: false, productName: null, source: "usda" }
-  }
-
-  const nutrients = extractNutrients(food)
-  if (!hasMeaningfulNutrients(nutrients)) {
-    return {
-      nutrients: null,
-      matched: false,
-      productName: food.description,
-      source: "usda",
-    }
-  }
-
-  setCachedNutrients(cacheKey, nutrients)
-  logger.info(
-    {
-      foodName,
-      product: food.description,
-      fdcId: food.fdcId,
-      dataType: food.dataType,
-    },
-    "USDA match found",
-  )
   return {
-    nutrients,
+    nutrients: candidate.nutrients,
     matched: true,
-    productName: food.description,
+    productName: candidate.productName,
     source: "usda",
+    providerId: candidate.id,
+    matchScore: candidate.matchScore,
+    dataType: candidate.dataType,
   }
 }

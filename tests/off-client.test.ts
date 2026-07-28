@@ -64,7 +64,7 @@ describe("lookupNutrients", () => {
     const result = await lookupNutrients("cream")
 
     expect(result.matched).toBe(false)
-    expect(result.productName).toBe("Lino lada duo")
+    expect(result.productName).toBeNull()
     expect(result.nutrients).toBeNull()
   })
 

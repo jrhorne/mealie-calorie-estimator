@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest"
-import { estimateGrams, estimateNutrients } from "../src/services/llm-estimator.js"
+import {
+  estimateGrams,
+  estimateNutrients,
+  verifyNutritionCandidates,
+} from "../src/services/llm-estimator.js"
 import { initCache, clearLlmCache } from "../src/utils/cache.js"
 import { config } from "../src/config.js"
 
@@ -216,5 +220,135 @@ describe("estimateNutrients", () => {
     expect(result).not.toBeNull()
     expect(result?.kcalPer100g).toBeNull()
     expect(result?.sodiumPer100g).toBe(38758)
+  })
+})
+
+describe("verifyNutritionCandidates", () => {
+  it("makes one identity-only call for every ingredient and accepts only supplied IDs", async () => {
+    config.llm.enabled = true
+    config.llm.apiKey = "sk-test"
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "google/gemma-3-4b-it",
+        choices: [{
+          finish_reason: "stop",
+          message: {
+            content: JSON.stringify({
+              decisions: [
+                {
+                  ingredient: "Italian seasoning verification test",
+                  candidateId: "usda:456",
+                  confidence: "high",
+                  reason: "Seasoning is the matching food type",
+                },
+                {
+                  ingredient: "whole-wheat rotini verification test",
+                  candidateId: "",
+                  confidence: "low",
+                  reason: "Bagel is not pasta",
+                },
+              ],
+            }),
+          },
+        }],
+      }),
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const decisions = await verifyNutritionCandidates([
+      {
+        ingredient: "Italian seasoning verification test",
+        candidates: [{
+          id: "usda:456",
+          productName: "Italian seasoning, dried herbs",
+          source: "usda",
+          matchScore: 0.96,
+          dataType: "Foundation",
+          nutrients: {
+            kcalPer100g: 250, proteinPer100g: 10, carbsPer100g: 40, fatPer100g: 5,
+            saturatedFatPer100g: 1, transFatPer100g: 0, unsaturatedFatPer100g: 4,
+            fiberPer100g: 20, sugarPer100g: 2, sodiumPer100g: 50,
+            cholesterolPer100g: 0,
+          },
+        }],
+      },
+      {
+        ingredient: "whole-wheat rotini verification test",
+        candidates: [{
+          id: "usda:789",
+          productName: "Bagel, whole wheat",
+          source: "usda",
+          matchScore: 0.5,
+          dataType: "Survey (FNDDS)",
+          nutrients: {
+            kcalPer100g: 250, proteinPer100g: 10, carbsPer100g: 50, fatPer100g: 2,
+            saturatedFatPer100g: 0.5, transFatPer100g: 0, unsaturatedFatPer100g: 1.5,
+            fiberPer100g: 4, sugarPer100g: 5, sodiumPer100g: 400,
+            cholesterolPer100g: 0,
+          },
+        }],
+      },
+    ])
+
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(decisions.get("Italian seasoning verification test")).toMatchObject({
+      candidateId: "usda:456",
+      confidence: "high",
+      verifiedBy: "llm",
+    })
+    expect(decisions.get("whole-wheat rotini verification test")?.candidateId).toBeNull()
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+    const prompt = body.messages[0].content as string
+    expect(prompt).toContain("Do not calculate, scale, sum, convert units")
+    expect(prompt).not.toContain("kcalPer100g")
+    expect(prompt).not.toContain("sodiumPer100g")
+    expect(body.response_format.json_schema.name).toBe("nutrition_source_matches")
+    expect(body.max_tokens).toBe(1024)
+  })
+
+  it("rejects a hallucinated candidate ID", async () => {
+    config.llm.enabled = true
+    config.llm.apiKey = "sk-test"
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              decisions: [{
+                ingredient: "cream hallucinated id test",
+                candidateId: "usda:not-supplied",
+                confidence: "high",
+                reason: "Invented",
+              }],
+            }),
+          },
+        }],
+      }),
+    }))
+
+    const decisions = await verifyNutritionCandidates([{
+      ingredient: "cream hallucinated id test",
+      candidates: [{
+        id: "usda:123",
+        productName: "Cream, fluid, light",
+        source: "usda",
+        matchScore: 0.95,
+        nutrients: {
+          kcalPer100g: 190, proteinPer100g: 3, carbsPer100g: 4, fatPer100g: 19,
+          saturatedFatPer100g: 12, transFatPer100g: 0, unsaturatedFatPer100g: 7,
+          fiberPer100g: 0, sugarPer100g: 4, sodiumPer100g: 40,
+          cholesterolPer100g: 60,
+        },
+      }],
+    }])
+
+    expect(decisions.get("cream hallucinated id test")).toMatchObject({
+      candidateId: null,
+      confidence: "low",
+    })
   })
 })

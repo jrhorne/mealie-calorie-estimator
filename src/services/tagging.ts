@@ -1,4 +1,10 @@
-import type { NutrientSet, MealieNutrition, MealieTag, MealieRecipe } from "../types.js"
+import type {
+  EstimateResult,
+  NutrientSet,
+  MealieNutrition,
+  MealieTag,
+  MealieRecipe,
+} from "../types.js"
 import { getOrCreateTags, patchRecipe } from "./mealie-client.js"
 import { estimateRecipe, buildNutritionPatch } from "./estimator.js"
 
@@ -105,6 +111,15 @@ export async function estimateAndTag(
   householdId?: string | null,
 ): Promise<{ calories: number | null; tagSlugs: string[] }> {
   const result = await estimateRecipe(recipe)
+  return applyEstimateAndTag(recipe, result, hash, householdId)
+}
+
+export async function applyEstimateAndTag(
+  recipe: MealieRecipe,
+  result: EstimateResult,
+  hash: string,
+  householdId?: string | null,
+): Promise<{ calories: number | null; tagSlugs: string[] }> {
   const nutritionPatch = buildNutritionPatch(result, hash, recipe.recipeYield)
   const { tags, tagSlugs } = await resolveAndMergeTags(recipe, result.perServingNutrients, householdId)
   await patchRecipe(recipe.slug, {

@@ -1,10 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { MealieRecipe, NutrientSet } from "../src/types.js"
 
-const { estimateGramsMock, estimateNutrientsMock, lookupNutrientsMock } = vi.hoisted(() => ({
+const {
+  estimateGramsMock,
+  estimateNutrientsMock,
+  lookupOffCandidatesMock,
+  lookupUsdaCandidatesMock,
+  verifyNutritionCandidatesMock,
+} = vi.hoisted(() => ({
   estimateGramsMock: vi.fn(),
   estimateNutrientsMock: vi.fn(),
-  lookupNutrientsMock: vi.fn(),
+  lookupOffCandidatesMock: vi.fn(),
+  lookupUsdaCandidatesMock: vi.fn(),
+  verifyNutritionCandidatesMock: vi.fn(),
 }))
 
 vi.mock("../src/services/unit-converter.js", () => ({
@@ -12,12 +20,17 @@ vi.mock("../src/services/unit-converter.js", () => ({
 }))
 
 vi.mock("../src/services/off-client.js", () => ({
-  lookupNutrients: lookupNutrientsMock,
+  lookupOffCandidates: lookupOffCandidatesMock,
+}))
+
+vi.mock("../src/services/usda-client.js", () => ({
+  lookupUsdaCandidates: lookupUsdaCandidatesMock,
 }))
 
 vi.mock("../src/services/llm-estimator.js", () => ({
   estimateGrams: estimateGramsMock,
   estimateNutrients: estimateNutrientsMock,
+  verifyNutritionCandidates: verifyNutritionCandidatesMock,
 }))
 
 import { estimateRecipe } from "../src/services/estimator.js"
@@ -40,12 +53,23 @@ beforeEach(() => {
   vi.clearAllMocks()
   estimateGramsMock.mockResolvedValue(360)
   estimateNutrientsMock.mockResolvedValue(null)
-  lookupNutrientsMock.mockResolvedValue({
-    matched: true,
+  lookupOffCandidatesMock.mockResolvedValue([{
+    id: "openfoodfacts:peppers",
     nutrients,
     productName: "Peppers",
     source: "openfoodfacts",
-  })
+    matchScore: 1,
+  }])
+  lookupUsdaCandidatesMock.mockResolvedValue([])
+  verifyNutritionCandidatesMock.mockResolvedValue(new Map([
+    ["peppers", {
+      ingredient: "peppers",
+      candidateId: "openfoodfacts:peppers",
+      confidence: "high",
+      reason: "Exact match",
+      verifiedBy: "llm",
+    }],
+  ]))
 })
 
 describe("estimateRecipe unitless counts", () => {

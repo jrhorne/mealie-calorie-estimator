@@ -1,3 +1,17 @@
+## 1.10.0 (2026-07-28)
+
+### Features
+
+* verify structured nutrition candidates in one schema-constrained LLM call per recipe
+* add non-mutating preview and explicit apply endpoints
+* record provider IDs, match scores, verification reasons, and weight sources
+
+### Bug Fixes
+
+* reject unrelated USDA and Open Food Facts composite-food matches
+* invalidate provider and LLM match caches when matching logic changes
+* keep all scaling, summation, serving division, and rounding in deterministic application code
+
 ## [1.9.0](https://github.com/timo-reymann/mealie-calorie-estimator/compare/v1.8.0...v1.9.0) (2026-07-26)
 
 ### Features
