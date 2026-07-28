@@ -8,6 +8,7 @@ describe("scoreFoodMatch", () => {
     ["whole-wheat rotini", "Bagel, whole wheat", "Survey (FNDDS)"],
     ["paprika", "Paprika Frischkäsezubereitung", "branded"],
     ["semisweet chocolate chips", "Cookies, chocolate chip, dry mix", "SR Legacy"],
+    ["semisweet chocolate chips", "Snacks, crisped rice bar, chocolate chip", "SR Legacy"],
   ])("rejects unrelated composite match %s -> %s", (query, candidate, dataType) => {
     expect(foodMatchIsPlausible(scoreFoodMatch(query, candidate, dataType))).toBe(false)
   })

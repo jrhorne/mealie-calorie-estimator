@@ -88,7 +88,7 @@ export async function initCache(): Promise<void> {
     value TEXT NOT NULL
   )`)
 
-  const offCacheVersion = "v10-composite-plural-filter"
+  const offCacheVersion = "v11-expanded-composite-filter"
   const versionStatement = db.prepare(
     "SELECT value FROM cache_metadata WHERE key = 'off_nutrient_units'",
   )
