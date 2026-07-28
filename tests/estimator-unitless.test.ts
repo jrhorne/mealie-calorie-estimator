@@ -40,7 +40,12 @@ beforeEach(() => {
   vi.clearAllMocks()
   estimateGramsMock.mockResolvedValue(360)
   estimateNutrientsMock.mockResolvedValue(null)
-  lookupNutrientsMock.mockResolvedValue({ matched: true, nutrients })
+  lookupNutrientsMock.mockResolvedValue({
+    matched: true,
+    nutrients,
+    productName: "Peppers",
+    source: "openfoodfacts",
+  })
 })
 
 describe("estimateRecipe unitless counts", () => {
@@ -71,5 +76,6 @@ describe("estimateRecipe unitless counts", () => {
     expect(result.unmatchedCount).toBe(0)
     expect(result.totalNutrients.kcalPer100g).toBeCloseTo(111.6)
     expect(result.matchedIngredients[0].llmEstimated).toBe(true)
+    expect(result.matchedIngredients[0].confidence).toBe("low")
   })
 })

@@ -2,13 +2,13 @@ import { config } from "../config.js"
 import { logger } from "../utils/logger.js"
 import { getCachedNutrients, setCachedNutrients } from "../utils/cache.js"
 import { waitForRateLimit, RateLimitType } from "../utils/rate-limiter.js"
-import type { OffNutriments, OffProduct, OffSearchResult, NutrientSet } from "../types.js"
-
-export interface OffLookupResult {
-  nutrients: NutrientSet | null
-  matched: boolean
-  productName: string | null
-}
+import type {
+  NutritionLookupResult,
+  OffNutriments,
+  OffProduct,
+  OffSearchResult,
+  NutrientSet,
+} from "../types.js"
 
 const OFF_NUTRIENT_FIELDS = ["product_name", "nutriments"].join(",")
 
@@ -138,17 +138,31 @@ async function searchProduct(query: string): Promise<OffProduct | null> {
   return data.hits[0]
 }
 
-export async function lookupNutrients(foodName: string, unitName?: string): Promise<OffLookupResult> {
+export async function lookupNutrients(
+  foodName: string,
+  unitName?: string,
+): Promise<NutritionLookupResult> {
   const known = knownNutrients(foodName)
   if (known) {
     logger.debug({ foodName }, "Known nutrient composition found")
-    return { nutrients: known, matched: true, productName: "Known composition: table salt" }
+    return {
+      nutrients: known,
+      matched: true,
+      productName: "Known composition: table salt",
+      source: "known",
+    }
   }
 
-  const cached = getCachedNutrients(foodName)
+  const cacheKey = `openfoodfacts:${foodName}`
+  const cached = getCachedNutrients(cacheKey)
   if (cached) {
     logger.debug({ foodName }, "Cache hit for food")
-    return { nutrients: cached, matched: true, productName: foodName }
+    return {
+      nutrients: cached,
+      matched: true,
+      productName: foodName,
+      source: "openfoodfacts",
+    }
   }
 
   let searchTerm = foodName
@@ -160,22 +174,42 @@ export async function lookupNutrients(foodName: string, unitName?: string): Prom
 
   if (!product) {
     logger.debug({ foodName }, "No OFF match found")
-    return { nutrients: null, matched: false, productName: null }
+    return {
+      nutrients: null,
+      matched: false,
+      productName: null,
+      source: "openfoodfacts",
+    }
   }
 
   if (!product.nutriments) {
     logger.debug({ foodName, product: product.product_name }, "OFF match has no nutrient data")
-    return { nutrients: null, matched: false, productName: product.product_name }
+    return {
+      nutrients: null,
+      matched: false,
+      productName: product.product_name,
+      source: "openfoodfacts",
+    }
   }
 
   const nutrients = extractNutrients(product.nutriments)
 
   if (nutrients.kcalPer100g === null) {
     logger.debug({ foodName, product: product.product_name }, "OFF match has no kcal data")
-    return { nutrients: null, matched: false, productName: product.product_name }
+    return {
+      nutrients: null,
+      matched: false,
+      productName: product.product_name,
+      source: "openfoodfacts",
+    }
   }
 
   logger.debug({ foodName, product: product.product_name }, "OFF match found")
-  setCachedNutrients(foodName, nutrients)
-  return { nutrients, matched: true, productName: product.product_name }
+  setCachedNutrients(cacheKey, nutrients)
+  return {
+    nutrients,
+    matched: true,
+    productName: product.product_name,
+    source: "openfoodfacts",
+  }
 }

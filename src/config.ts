@@ -46,6 +46,15 @@ export const config = {
     userAgent: process.env.OFF_USER_AGENT || `mealie-calorie-estimator/${version} (mail@timo-reymann.de)`,
   },
 
+  usda: {
+    apiKey: process.env.USDA_API_KEY || "",
+    baseUrl: process.env.USDA_BASE_URL || "https://api.nal.usda.gov/fdc/v1",
+    rateLimit: parseInt(process.env.USDA_RATE_LIMIT || "60", 10),
+    timeoutMs: parseInt(process.env.USDA_TIMEOUT_MS || "15000", 10),
+    maxRetries: parseInt(process.env.USDA_MAX_RETRIES || "2", 10),
+    retryBackoffMs: parseInt(process.env.USDA_RETRY_BACKOFF_MS || "500", 10),
+  },
+
   llm: {
     enabled: (process.env.LLM_ENABLED || "false").toLowerCase() === "true",
     baseUrl: process.env.LLM_BASE_URL || "https://api.mistral.ai/v1",

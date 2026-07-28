@@ -123,12 +123,25 @@ export interface NutrientSet {
   cholesterolPer100g: number | null
 }
 
+export type NutritionSource = "known" | "openfoodfacts" | "usda" | "llm"
+export type NutritionConfidence = "high" | "medium" | "low"
+
+export interface NutritionLookupResult {
+  nutrients: NutrientSet | null
+  matched: boolean
+  productName: string | null
+  source: Exclude<NutritionSource, "llm">
+}
+
 export interface IngredientMatch {
   name: string
   grams: number | null
   matched: boolean
   nutrients: NutrientSet | null
   llmEstimated?: boolean
+  nutritionSource?: NutritionSource
+  confidence?: NutritionConfidence
+  productName?: string | null
 }
 
 export interface EstimateResult {

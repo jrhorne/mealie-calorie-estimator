@@ -223,6 +223,45 @@ describe("buildNutritionPatch", () => {
     expect(patch.extras.calorie_estimator_total_kcal).toBe("500")
   })
 
+  it("stores ingredient-level source and confidence provenance", () => {
+    const result: EstimateResult = {
+      slug: "test",
+      servings: 1,
+      totalNutrients: n(0, { sodiumPer100g: 1937.9 }),
+      perServingNutrients: n(0, { sodiumPer100g: 1938 }),
+      matchedCount: 1,
+      unmatchedCount: 0,
+      unmatchedIngredients: [],
+      matchedIngredients: [
+        {
+          name: "salt",
+          grams: 5,
+          matched: true,
+          nutrients: n(0, { sodiumPer100g: 38_758 }),
+          nutritionSource: "known",
+          confidence: "high",
+          productName: "Known composition: table salt",
+        },
+      ],
+    }
+
+    const patch = buildNutritionPatch(result, "known-source", "1 serving")
+    const provenance = JSON.parse(patch.extras.calorie_estimator_provenance)
+
+    expect(provenance).toEqual([
+      {
+        name: "salt",
+        grams: 5,
+        matched: true,
+        nutritionSource: "known",
+        confidence: "high",
+        productName: "Known composition: table salt",
+        llmAssisted: false,
+      },
+    ])
+    expect(patch.extras.calorie_estimator_low_confidence).toBe("[]")
+  })
+
   it("handles zero total kcal", () => {
     const result: EstimateResult = {
       slug: "test",

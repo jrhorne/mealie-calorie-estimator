@@ -72,7 +72,7 @@ export async function initCache(): Promise<void> {
     value TEXT NOT NULL
   )`)
 
-  const offCacheVersion = "v2-milligram-micros"
+  const offCacheVersion = "v3-provider-keys-and-milligram-micros"
   const versionStatement = db.prepare(
     "SELECT value FROM cache_metadata WHERE key = 'off_nutrient_units'",
   )

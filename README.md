@@ -33,10 +33,12 @@ mealie-calorie-estimator
 This small service enriches [Mealie](https://mealie.io/) (self-hosted recipe manager) with nutritional data by:
 
 1. **Listening for webhooks** triggered when a recipe is created or updated.
-2. **Resolving ingredients** — each `food.name` is searched on Open Food Facts, with an optional LLM estimate per 100g when there is no match.
+2. **Resolving ingredients** — chemically fixed pantry items use deterministic composition, then each `food.name` is searched on Open Food Facts and optionally USDA FoodData Central, with an optional LLM estimate per 100g only when database lookups fail.
 3. **Patching nutrition** back into Mealie's nutrition fields.
 
 Unit conversion uses a built-in table for common units. Custom units are estimated via LLM when enabled. A SHA256 hash of the ingredients skips re-estimation when nothing changed, and manually entered calories are preserved.
+
+Each estimate stores compact per-ingredient provenance in the recipe extras, including the matched source, source product name, confidence tier, gram weight, and whether the LLM assisted. Open Food Facts gram-based sodium and cholesterol values are normalized to Mealie's milligram fields. Common culinary salts use deterministic sodium composition so zero-calorie ingredients are not discarded or delegated to an unreliable model estimate.
 
 ### Auto-Tagging
 
@@ -107,6 +109,12 @@ It's recommended to install it next to your Mealie instance using docker-compose
 | `OFF_BASE_URL` | `https://world.openfoodfacts.org` | Open Food Facts base URL |
 | `OFF_MAX_RETRIES` | `3` | Retries for transient OFF search errors (429/5xx) |
 | `OFF_RETRY_BACKOFF_MS` | `500` | Base backoff between retries (doubles each attempt) |
+| `USDA_API_KEY` | — | Optional data.gov API key enabling USDA FoodData Central fallback after Open Food Facts |
+| `USDA_BASE_URL` | `https://api.nal.usda.gov/fdc/v1` | USDA FoodData Central API base URL |
+| `USDA_RATE_LIMIT` | `60` | Maximum USDA lookups per minute |
+| `USDA_TIMEOUT_MS` | `15000` | Timeout for a USDA request |
+| `USDA_MAX_RETRIES` | `2` | Retries for transient USDA errors (429/5xx) |
+| `USDA_RETRY_BACKOFF_MS` | `500` | Base USDA retry backoff |
 | `LLM_ENABLED` | `false` | Enable LLM fallback for custom units and unmatched foods |
 | `LLM_API_KEY` | — | API key for OpenAI-compatible endpoint |
 | `LLM_BASE_URL` | `https://api.mistral.ai/v1` | LLM API base URL |
@@ -145,7 +153,7 @@ See [`.env.example`](./.env.example) for the full list, including rate-limit and
 
 <!-- Add bit of context why the project has been created -->
 
-Mealie stores nutrition only when entered by hand. Maintaining that for every recipe is tedious, so this service fills the gap automatically from Open Food Facts (and an optional LLM) while leaving manual entries untouched.
+Mealie stores nutrition only when entered by hand. Maintaining that for every recipe is tedious, so this service fills the gap automatically from deterministic pantry data, Open Food Facts, optional USDA FoodData Central, and finally an optional LLM while leaving manual entries untouched.
 
 ## Contributing
 

@@ -17,9 +17,15 @@ const llmLimiter = new RateLimiterMemory({
   duration: 60,
 })
 
+const usdaLimiter = new RateLimiterMemory({
+  points: config.usda.rateLimit,
+  duration: 60,
+})
+
 export enum RateLimitType {
   Search = "search",
   Product = "product",
+  Usda = "usda",
   Llm = "llm",
 }
 
@@ -29,6 +35,8 @@ function getLimiter(type: RateLimitType): RateLimiterMemory {
       return searchLimiter
     case RateLimitType.Product:
       return productLimiter
+    case RateLimitType.Usda:
+      return usdaLimiter
     case RateLimitType.Llm:
       return llmLimiter
   }
@@ -36,7 +44,7 @@ function getLimiter(type: RateLimitType): RateLimiterMemory {
 
 export async function waitForRateLimit(type: RateLimitType): Promise<void> {
   const limiter = getLimiter(type)
-  const typeName = type === RateLimitType.Search ? "search" : type === RateLimitType.Product ? "product" : "llm"
+  const typeName = type
   let waited = false
 
   while (true) {

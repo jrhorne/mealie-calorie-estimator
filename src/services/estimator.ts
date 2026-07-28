@@ -6,6 +6,7 @@ import type {
 import { config } from "../config.js"
 import { convertToGrams } from "./unit-converter.js"
 import { lookupNutrients } from "./off-client.js"
+import { lookupUsdaNutrients } from "./usda-client.js"
 import { estimateGrams, estimateNutrients } from "./llm-estimator.js"
 import { logger } from "../utils/logger.js"
 
@@ -130,26 +131,63 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
 
     if (grams === null) {
       unmatchedNames.push(foodName)
-      matchedIngredients.push({ name: foodName, grams: null, matched: false, nutrients: null })
+      matchedIngredients.push({
+        name: foodName,
+        grams: null,
+        matched: false,
+        nutrients: null,
+        confidence: "low",
+      })
       continue
     }
 
-    const result = await lookupNutrients(foodName, ing.unit?.name)
+    let result = await lookupNutrients(foodName, ing.unit?.name)
+    if (!result.matched || result.nutrients === null) {
+      result = await lookupUsdaNutrients(foodName)
+    }
 
     if (!result.matched || result.nutrients === null) {
       const llmNutrients = await estimateNutrients(foodName)
       if (llmNutrients !== null) {
         totalNutrients = addToTotal(totalNutrients, llmNutrients, grams)
-        matchedIngredients.push({ name: foodName, grams, matched: true, nutrients: llmNutrients, llmEstimated: true })
+        matchedIngredients.push({
+          name: foodName,
+          grams,
+          matched: true,
+          nutrients: llmNutrients,
+          llmEstimated: true,
+          nutritionSource: "llm",
+          confidence: "low",
+        })
         continue
       }
       unmatchedNames.push(foodName)
-      matchedIngredients.push({ name: foodName, grams, matched: false, nutrients: null })
+      matchedIngredients.push({
+        name: foodName,
+        grams,
+        matched: false,
+        nutrients: null,
+        confidence: "low",
+      })
       continue
     }
 
     totalNutrients = addToTotal(totalNutrients, result.nutrients, grams)
-    matchedIngredients.push({ name: foodName, grams, matched: true, nutrients: result.nutrients, llmEstimated })
+    matchedIngredients.push({
+      name: foodName,
+      grams,
+      matched: true,
+      nutrients: result.nutrients,
+      llmEstimated,
+      nutritionSource: result.source,
+      confidence:
+        llmEstimated
+          ? "low"
+          : result.source === "known" || result.source === "usda"
+            ? "high"
+            : "medium",
+      productName: result.productName,
+    })
   }
 
   const servings = parseYield(recipe.recipeYield) ?? recipe.recipeServings
@@ -174,6 +212,11 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
       kcalPerServing: perServingNutrients.kcalPer100g,
       matched: result.matchedCount,
       unmatched: result.unmatchedCount,
+      sources: matchedIngredients.reduce<Record<string, number>>((counts, ingredient) => {
+        const source = ingredient.nutritionSource ?? "unmatched"
+        counts[source] = (counts[source] ?? 0) + 1
+        return counts
+      }, {}),
     },
     "Estimated nutrition for recipe",
   )
@@ -216,7 +259,23 @@ export function buildNutritionPatch(
   const extras: Record<string, string> = {
     calorie_estimator_hash: hash,
     calorie_estimator_unmatched: JSON.stringify(result.unmatchedIngredients),
+    calorie_estimator_provenance: JSON.stringify(
+      result.matchedIngredients.map((ingredient) => ({
+        name: ingredient.name,
+        grams: ingredient.grams,
+        matched: ingredient.matched,
+        nutritionSource: ingredient.nutritionSource ?? null,
+        confidence: ingredient.confidence ?? null,
+        productName: ingredient.productName ?? null,
+        llmAssisted: ingredient.llmEstimated ?? false,
+      })),
+    ),
   }
+  extras.calorie_estimator_low_confidence = JSON.stringify(
+    result.matchedIngredients
+      .filter((ingredient) => ingredient.confidence === "low")
+      .map((ingredient) => ingredient.name),
+  )
 
   if (llmIngredients.length > 0) {
     extras.calorie_estimator_llm_ingredients = JSON.stringify(llmIngredients)
