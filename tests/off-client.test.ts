@@ -56,12 +56,24 @@ describe("lookupNutrients", () => {
     expect(calledUrl).toContain("langs=de")
   })
 
+  it("rejects an unrelated top search hit", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      hitsResponse(MILK_NUTRIMENTS, "Lino lada duo"),
+    )
+
+    const result = await lookupNutrients("cream")
+
+    expect(result.matched).toBe(false)
+    expect(result.productName).toBe("Lino lada duo")
+    expect(result.nutrients).toBeNull()
+  })
+
   it("retries on a 503 and succeeds on a later attempt", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
       .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
-      .mockResolvedValueOnce(hitsResponse(MILK_NUTRIMENTS))
+      .mockResolvedValueOnce(hitsResponse(MILK_NUTRIMENTS, "Wasser"))
 
     const result = await lookupNutrients("Wasser")
 

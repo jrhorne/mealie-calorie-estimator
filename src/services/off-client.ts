@@ -45,6 +45,24 @@ function knownNutrients(foodName: string): NutrientSet | null {
   return KNOWN_SALT_NAMES.has(normalized) ? { ...TABLE_SALT_NUTRIENTS } : null
 }
 
+function significantTokens(value: string): Set<string> {
+  return new Set(
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .split(/\s+/)
+      .map((token) => token.replace(/s$/, ""))
+      .filter((token) => token.length >= 3),
+  )
+}
+
+function productNameMatchesQuery(query: string, productName: string | undefined): boolean {
+  if (!productName) return false
+  const queryTokens = significantTokens(query)
+  const productTokens = significantTokens(productName)
+  return [...queryTokens].some((token) => productTokens.has(token))
+}
+
 async function fetchWithRetry(url: string, query: string): Promise<Response | null> {
   const { maxRetries, retryBackoffMs, userAgent } = config.openFoodFacts
   let lastResponse: Response | null = null
@@ -184,6 +202,19 @@ export async function lookupNutrients(
 
   if (!product.nutriments) {
     logger.debug({ foodName, product: product.product_name }, "OFF match has no nutrient data")
+    return {
+      nutrients: null,
+      matched: false,
+      productName: product.product_name,
+      source: "openfoodfacts",
+    }
+  }
+
+  if (!productNameMatchesQuery(searchTerm, product.product_name)) {
+    logger.debug(
+      { foodName, searchTerm, product: product.product_name },
+      "Rejected unrelated OFF product match",
+    )
     return {
       nutrients: null,
       matched: false,
