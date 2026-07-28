@@ -15,9 +15,9 @@ function unit(overrides: Partial<MealieUnit> = {}): MealieUnit {
 }
 
 describe("convertToGrams", () => {
-  it("uses standardQuantity when available", () => {
+  it("does not assume milliliters have water density", () => {
     const u = unit({ name: "cup", standardQuantity: 240, standardUnit: "ml" })
-    expect(convertToGrams(2, u)).toBe(480)
+    expect(convertToGrams(2, u)).toBeNull()
   })
 
   it("uses standardQuantity with g unit", () => {
@@ -27,11 +27,21 @@ describe("convertToGrams", () => {
 
   it("uses fallback for known units", () => {
     expect(convertToGrams(1, unit({ name: "kg" }))).toBe(1000)
-    expect(convertToGrams(2, unit({ name: "tbsp" }))).toBe(30)
-    expect(convertToGrams(3, unit({ name: "tsp" }))).toBe(15)
     expect(convertToGrams(1, unit({ name: "oz" }))).toBe(28.35)
     expect(convertToGrams(1, unit({ name: "lb" }))).toBe(453.592)
     expect(convertToGrams(1, unit({ name: "pinch" }))).toBe(0.5)
+  })
+
+  it("requires ingredient-specific weights for volume measures", () => {
+    expect(convertToGrams(1, unit({ name: "cup" }))).toBeNull()
+    expect(convertToGrams(2, unit({ name: "tbsp" }))).toBeNull()
+    expect(convertToGrams(3, unit({ name: "tsp" }))).toBeNull()
+    expect(convertToGrams(100, unit({ name: "ml" }))).toBeNull()
+  })
+
+  it("uses the deterministic known composition weight for culinary salt", () => {
+    expect(convertToGrams(1, unit({ name: "tsp" }), "salt")).toBe(5)
+    expect(convertToGrams(2, unit({ name: "tbsp" }), "kosher salt")).toBe(30)
   })
 
   it("returns null for unknown units", () => {
@@ -47,8 +57,8 @@ describe("convertToGrams", () => {
     expect(convertToGrams(1, null)).toBeNull()
   })
 
-  it("handles ml to grams via standardUnit", () => {
+  it("does not convert liters to grams without ingredient density", () => {
     const u = unit({ name: "liter", standardQuantity: 1, standardUnit: "l" })
-    expect(convertToGrams(2, u)).toBe(2000)
+    expect(convertToGrams(2, u)).toBeNull()
   })
 })

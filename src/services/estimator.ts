@@ -123,7 +123,7 @@ export async function estimateRecipe(recipe: MealieRecipe): Promise<EstimateResu
 
     const override = overrides[foodName.toLowerCase().trim()]
     const lookupQuery = override?.query ?? foodName
-    let grams = override?.grams ?? convertToGrams(quantity, ing.unit)
+    let grams = override?.grams ?? convertToGrams(quantity, ing.unit, foodName)
     let weightSource: PreparedIngredient["weightSource"] = "unit-converter"
     if (override?.grams !== undefined) weightSource = "override"
 
