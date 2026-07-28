@@ -87,6 +87,10 @@ function parseJson(content: string): Record<string, unknown> {
   return JSON.parse(content.replace(/```json\n?|\n?```/g, ""))
 }
 
+function hasMeaningfulNutrients(nutrients: NutrientSet): boolean {
+  return Object.values(nutrients).some((value) => value !== null && value > 0)
+}
+
 function logCompletion(data: LlmResponse, estimateType: "weight" | "nutrients", foodName: string): void {
   logger.info(
     {
@@ -266,16 +270,20 @@ export async function estimateNutrients(foodName: string): Promise<NutrientSet |
       nutrients.unsaturatedFatPer100g = Math.round((nutrients.fatPer100g - s - t) * 10) / 10
     }
 
-    if (nutrients.kcalPer100g !== null && nutrients.kcalPer100g > 0) {
+    if (hasMeaningfulNutrients(nutrients)) {
       setCachedLlmNutrients(foodName, nutrients)
       logger.info(
-        { foodName, kcal: nutrients.kcalPer100g, model: data.model ?? config.llm.model },
+        {
+          foodName,
+          kcal: nutrients.kcalPer100g ?? 0,
+          model: data.model ?? config.llm.model,
+        },
         "LLM nutrient estimate obtained",
       )
       return nutrients
     }
 
-    logger.debug({ foodName }, "LLM returned zero kcal, discarding")
+    logger.debug({ foodName }, "LLM returned no meaningful nutrients, discarding")
     return null
   } catch (err) {
     logger.warn({ err, foodName }, "LLM nutrient estimation failed")

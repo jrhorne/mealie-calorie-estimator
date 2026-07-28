@@ -183,4 +183,38 @@ describe("estimateNutrients", () => {
     expect(callArgs.response_format.json_schema.name).toBe("nutrient_estimate")
     expect(callArgs.max_tokens).toBe(256)
   })
+
+  it("preserves sodium for zero-calorie foods", async () => {
+    config.llm.enabled = true
+    config.llm.apiKey = "sk-test"
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{
+          finish_reason: "stop",
+          message: {
+            content: JSON.stringify({
+              kcal: 0,
+              protein: 0,
+              carbs: 0,
+              fat: 0,
+              saturatedFat: 0,
+              transFat: 0,
+              fiber: 0,
+              sugar: 0,
+              sodium: 38758,
+              cholesterol: 0,
+            }),
+          },
+        }],
+      }),
+    }))
+
+    const result = await estimateNutrients("salt")
+
+    expect(result).not.toBeNull()
+    expect(result?.kcalPer100g).toBeNull()
+    expect(result?.sodiumPer100g).toBe(38758)
+  })
 })
