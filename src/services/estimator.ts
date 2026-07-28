@@ -301,6 +301,17 @@ export function hasManualCalories(recipe: MealieRecipe): boolean {
   return !hasHash && hasStoredNutrition
 }
 
+export function estimateIsComplete(result: EstimateResult): boolean {
+  return (
+    result.matchedCount > 0
+    && result.unmatchedCount === 0
+    && result.servings !== null
+    && result.servings > 0
+    && result.totalNutrients.kcalPer100g !== null
+    && result.perServingNutrients.kcalPer100g !== null
+  )
+}
+
 export function buildManualAckPatch(recipe: MealieRecipe, hash: string): NutritionPatch {
   return {
     nutrition: {},

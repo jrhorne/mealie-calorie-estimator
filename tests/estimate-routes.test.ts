@@ -21,6 +21,12 @@ vi.mock("../src/services/mealie-client.js", () => ({
 
 vi.mock("../src/services/estimator.js", () => ({
   computeIngredientHash: vi.fn(() => "hash"),
+  estimateIsComplete: vi.fn((estimate: EstimateResult) => (
+    estimate.matchedCount > 0
+    && estimate.unmatchedCount === 0
+    && estimate.servings !== null
+    && estimate.totalNutrients.kcalPer100g !== null
+  )),
   estimateRecipe: estimateRecipeMock,
   shouldEstimate: vi.fn(() => true),
 }))
@@ -57,7 +63,7 @@ const result: EstimateResult = {
   servings: 2,
   totalNutrients: { ...empty(), kcalPer100g: 400 },
   perServingNutrients: { ...empty(), kcalPer100g: 200 },
-  matchedCount: 0,
+  matchedCount: 1,
   unmatchedCount: 0,
   unmatchedIngredients: [],
   matchedIngredients: [],
@@ -107,6 +113,31 @@ describe("estimate routes", () => {
     expect(response.statusCode).toBe(200)
     expect(applyEstimateAndTagMock).toHaveBeenCalledTimes(1)
     expect(applyEstimateAndTagMock).toHaveBeenCalledWith(recipe, result, "hash", null)
+    await app.close()
+  })
+
+  it("refuses to apply an incomplete estimate", async () => {
+    estimateRecipeMock.mockResolvedValue({
+      ...result,
+      matchedCount: 0,
+      unmatchedCount: 1,
+      unmatchedIngredients: ["dry pasta"],
+    })
+    const app = Fastify()
+    await app.register(estimateRoutes)
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/estimate/apply",
+      payload: { slug: recipe.slug },
+    })
+
+    expect(response.statusCode).toBe(422)
+    expect(response.json()).toEqual({
+      error: "Estimate is incomplete and was not applied",
+      unmatchedIngredients: ["dry pasta"],
+    })
+    expect(applyEstimateAndTagMock).not.toHaveBeenCalled()
     await app.close()
   })
 })

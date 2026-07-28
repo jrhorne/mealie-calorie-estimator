@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify"
 import { getRecipe, getRecipeHouseholdId } from "../services/mealie-client.js"
 import {
   computeIngredientHash,
+  estimateIsComplete,
   estimateRecipe,
   shouldEstimate,
 } from "../services/estimator.js"
@@ -90,6 +91,12 @@ export async function estimateRoutes(app: FastifyInstance): Promise<void> {
     const householdId = getRecipeHouseholdId(recipe)
     const hash = computeIngredientHash(recipe)
     const result = await estimateRecipe(recipe)
+    if (!estimateIsComplete(result)) {
+      return reply.status(422).send({
+        error: "Estimate is incomplete and was not applied",
+        unmatchedIngredients: result.unmatchedIngredients,
+      })
+    }
     const applied = await applyEstimateAndTag(recipe, result, hash, householdId)
     logger.info({ slug, ...applied }, "On-demand estimation applied")
     return reply.send({ status: "applied", result, ...applied })

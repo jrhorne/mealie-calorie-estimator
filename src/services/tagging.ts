@@ -6,7 +6,11 @@ import type {
   MealieRecipe,
 } from "../types.js"
 import { getOrCreateTags, patchRecipe } from "./mealie-client.js"
-import { estimateRecipe, buildNutritionPatch } from "./estimator.js"
+import {
+  estimateRecipe,
+  buildNutritionPatch,
+  estimateIsComplete,
+} from "./estimator.js"
 
 export function getCalorieTag(kcal: number | null): string | null {
   if (kcal === null) return null
@@ -120,6 +124,12 @@ export async function applyEstimateAndTag(
   hash: string,
   householdId?: string | null,
 ): Promise<{ calories: number | null; tagSlugs: string[] }> {
+  if (!estimateIsComplete(result)) {
+    throw new Error(
+      `Refusing to apply incomplete estimate for ${recipe.slug}: `
+      + `${result.unmatchedIngredients.join(", ") || "missing totals or servings"}`,
+    )
+  }
   const nutritionPatch = buildNutritionPatch(result, hash, recipe.recipeYield)
   const { tags, tagSlugs } = await resolveAndMergeTags(recipe, result.perServingNutrients, householdId)
   await patchRecipe(recipe.slug, {
