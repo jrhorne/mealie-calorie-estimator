@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify"
 import { getRecipe, getRecipeHouseholdId } from "../services/mealie-client.js"
 import { computeIngredientHash, shouldEstimate } from "../services/estimator.js"
 import { estimateAndTag } from "../services/tagging.js"
+import { runRecipeJob } from "../utils/in-flight.js"
 import { logger } from "../utils/logger.js"
 
 async function processEstimate(slug: string): Promise<void> {
@@ -33,6 +34,11 @@ export async function estimateRoutes(app: FastifyInstance): Promise<void> {
 
     reply.status(202).send({ status: "accepted" })
 
-    setImmediate(() => processEstimate(slug))
+    setImmediate(() => {
+      const job = runRecipeJob(slug, () => processEstimate(slug))
+      if (!job.started) {
+        logger.info({ slug }, "Joined existing recipe estimation")
+      }
+    })
   })
 }

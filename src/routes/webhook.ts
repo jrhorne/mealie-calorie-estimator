@@ -8,6 +8,7 @@ import {
   shouldEstimate,
 } from "../services/estimator.js"
 import { perServingFromRecipeNutrition, tagsAreComplete, resolveAndMergeTags, estimateAndTag } from "../services/tagging.js"
+import { runRecipeJob } from "../utils/in-flight.js"
 import { logger } from "../utils/logger.js"
 
 function isEventRecipeData(v: unknown): v is EventRecipeData {
@@ -108,6 +109,11 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
 
     reply.status(202).send({ status: "accepted" })
 
-    setImmediate(() => processWebhook(slug))
+    setImmediate(() => {
+      const job = runRecipeJob(slug, () => processWebhook(slug))
+      if (!job.started) {
+        logger.info({ slug }, "Joined existing recipe estimation")
+      }
+    })
   })
 }
