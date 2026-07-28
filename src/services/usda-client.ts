@@ -37,7 +37,7 @@ interface UsdaSearchResponse {
 }
 
 const NUTRIENT_IDS = {
-  calories: 1008,
+  calories: [1008, 2048, 2047],
   protein: 1003,
   carbs: 1005,
   fat: 1004,
@@ -65,11 +65,12 @@ function convertMass(value: number, unitName: string, target: "g" | "mg"): numbe
 
 function valueFor(
   food: UsdaFood,
-  nutrientId: number,
+  nutrientId: number | readonly number[],
   target: "g" | "mg" | "kcal",
 ): number | null {
+  const nutrientIds = Array.isArray(nutrientId) ? nutrientId : [nutrientId]
   const nutrient = food.foodNutrients?.find(
-    (item) => (item.nutrientId ?? item.nutrient?.id) === nutrientId,
+    (item) => nutrientIds.includes(item.nutrientId ?? item.nutrient?.id ?? -1),
   )
   const value = nutrient?.value ?? nutrient?.amount
   const unitName = nutrient?.unitName ?? nutrient?.nutrient?.unitName
@@ -168,7 +169,7 @@ export async function lookupUsdaCandidates(
   for (const food of foods) {
     if (!food.foodNutrients?.length) continue
     const nutrients = extractNutrients(food)
-    if (!hasMeaningfulNutrients(nutrients)) continue
+    if (nutrients.kcalPer100g === null || !hasMeaningfulNutrients(nutrients)) continue
     const matchScore = scoreFoodMatch(foodName, food.description, food.dataType)
     if (!foodMatchIsPlausible(matchScore)) {
       logger.debug(
@@ -251,7 +252,7 @@ export async function lookupUsdaCandidateById(
 
   if (!food || food.fdcId !== Number(idText) || !food.foodNutrients?.length) return null
   const nutrients = extractNutrients(food)
-  if (!hasMeaningfulNutrients(nutrients)) return null
+  if (nutrients.kcalPer100g === null || !hasMeaningfulNutrients(nutrients)) return null
   const candidate: NutritionCandidate = {
     id: providerId,
     nutrients,

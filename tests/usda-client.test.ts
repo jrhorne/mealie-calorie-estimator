@@ -162,7 +162,11 @@ describe("lookupUsdaNutrients", () => {
         dataType: "SR Legacy",
         foodNutrients: [
           {
-            nutrient: { id: 1008, name: "Energy", unitName: "kcal" },
+            nutrient: {
+              id: 2047,
+              name: "Energy (Atwater General Factors)",
+              unitName: "kcal",
+            },
             amount: 352,
           },
           {
