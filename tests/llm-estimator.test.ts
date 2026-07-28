@@ -15,6 +15,8 @@ beforeEach(() => {
   config.llm.enabled = false
   config.llm.apiKey = ""
   config.llm.structuredOutputs = true
+  config.llm.maxRetries = 0
+  config.llm.retryBackoffMs = 1
   clearLlmCache()
   vi.restoreAllMocks()
 })
@@ -224,6 +226,32 @@ describe("estimateNutrients", () => {
 })
 
 describe("verifyNutritionCandidates", () => {
+  it("fails closed on a near-match when LLM verification is unavailable", async () => {
+    config.llm.enabled = false
+
+    const decisions = await verifyNutritionCandidates([{
+      ingredient: "cream fail closed test",
+      candidates: [{
+        id: "usda:cream-cheese",
+        productName: "Cheese, cream",
+        source: "usda",
+        matchScore: 0.975,
+        nutrients: {
+          kcalPer100g: 350, proteinPer100g: 6, carbsPer100g: 6, fatPer100g: 34,
+          saturatedFatPer100g: 20, transFatPer100g: 0, unsaturatedFatPer100g: 14,
+          fiberPer100g: 0, sugarPer100g: 4, sodiumPer100g: 300,
+          cholesterolPer100g: 100,
+        },
+      }],
+    }])
+
+    expect(decisions.get("cream fail closed test")).toMatchObject({
+      candidateId: null,
+      confidence: "low",
+      verifiedBy: "deterministic",
+    })
+  })
+
   it("makes one identity-only call for every ingredient and accepts only supplied IDs", async () => {
     config.llm.enabled = true
     config.llm.apiKey = "sk-test"
@@ -349,6 +377,51 @@ describe("verifyNutritionCandidates", () => {
     expect(decisions.get("cream hallucinated id test")).toMatchObject({
       candidateId: null,
       confidence: "low",
+    })
+  })
+
+  it("retries a transient 429 before accepting a constrained match", async () => {
+    config.llm.enabled = true
+    config.llm.apiKey = "sk-test"
+    config.llm.maxRetries = 1
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              decisions: [{
+                ingredient: "retry match test",
+                candidateId: "usda:retry",
+                confidence: "high",
+                reason: "Exact food identity",
+              }],
+            }),
+          },
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+    vi.stubGlobal("fetch", mockFetch)
+
+    const decisions = await verifyNutritionCandidates([{
+      ingredient: "retry match test",
+      candidates: [{
+        id: "usda:retry",
+        productName: "Retry match test",
+        source: "usda",
+        matchScore: 1,
+        nutrients: {
+          kcalPer100g: 10, proteinPer100g: 1, carbsPer100g: 1, fatPer100g: 1,
+          saturatedFatPer100g: 0, transFatPer100g: 0, unsaturatedFatPer100g: 1,
+          fiberPer100g: 0, sugarPer100g: 0, sodiumPer100g: 0,
+          cholesterolPer100g: 0,
+        },
+      }],
+    }])
+
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(decisions.get("retry match test")).toMatchObject({
+      candidateId: "usda:retry",
+      verifiedBy: "llm",
     })
   })
 })

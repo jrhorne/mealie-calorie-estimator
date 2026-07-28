@@ -124,6 +124,9 @@ It's recommended to install it next to your Mealie instance using docker-compose
 | `LLM_WEIGHT_MAX_TOKENS` | `64` | Output-token limit for unit and item weight estimates |
 | `LLM_NUTRIENT_MAX_TOKENS` | `256` | Output-token limit for nutrient estimates |
 | `LLM_MATCH_MAX_TOKENS` | `1024` | Output-token limit for the recipe-level source matching decision |
+| `LLM_TIMEOUT_MS` | `60000` | Timeout for each LLM request |
+| `LLM_MAX_RETRIES` | `2` | Retries for transient LLM 429/5xx responses |
+| `LLM_RETRY_BACKOFF_MS` | `2000` | Base exponential backoff for transient LLM errors |
 | `ESTIMATE_STRATEGY` | `all` | Estimation strategy: `all` (estimate every recipe) or `tagged` (only estimate recipes with the `ESTIMATE_TAG` tag) |
 | `ESTIMATE_TAG` | `estimate` | Tag name to check when `ESTIMATE_STRATEGY=tagged` |
 | `PORT` | `8000` | Server port |

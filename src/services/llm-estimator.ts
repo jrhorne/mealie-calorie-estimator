@@ -35,6 +35,8 @@ interface LlmResponse {
   usage?: LlmUsage
 }
 
+const RETRYABLE_LLM_STATUS = new Set([429, 500, 502, 503, 504])
+
 const weightResponseFormat = {
   type: "json_schema",
   json_schema: {
@@ -117,6 +119,51 @@ function endpointUrl(): string {
   return `${config.llm.baseUrl.replace(/\/+$/, "")}/${config.llm.endpointUrl.replace(/^\/+/, "")}`
 }
 
+async function fetchLlm(
+  body: Record<string, unknown>,
+  operation: "weight" | "nutrients" | "matches",
+): Promise<Response | null> {
+  for (let attempt = 0; attempt <= config.llm.maxRetries; attempt++) {
+    if (attempt > 0) {
+      const backoff = config.llm.retryBackoffMs * 2 ** (attempt - 1)
+      await new Promise((resolve) => setTimeout(resolve, Math.min(backoff, 30_000)))
+    }
+    await waitForRateLimit(RateLimitType.Llm)
+    try {
+      const response = await fetch(endpointUrl(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.llm.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(config.llm.timeoutMs),
+      })
+      if (
+        response.ok
+        || !RETRYABLE_LLM_STATUS.has(response.status)
+        || attempt === config.llm.maxRetries
+      ) {
+        return response
+      }
+      logger.warn(
+        { operation, status: response.status, attempt: attempt + 1 },
+        "Retrying transient LLM API response",
+      )
+    } catch (error) {
+      if (attempt === config.llm.maxRetries) {
+        logger.warn({ operation, error }, "LLM API request failed after retries")
+        return null
+      }
+      logger.warn(
+        { operation, attempt: attempt + 1, error },
+        "Retrying failed LLM API request",
+      )
+    }
+  }
+  return null
+}
+
 function extractContent(data: LlmResponse): string | null {
   const content = data.choices?.[0]?.message?.content
   if (typeof content === "string") return content.trim() || null
@@ -180,7 +227,7 @@ function deterministicDecision(group: NutritionCandidateGroup): NutritionCandida
   const candidate = [...group.candidates].sort(
     (left, right) => right.matchScore - left.matchScore,
   )[0]
-  if (candidate && candidate.matchScore >= 0.95) {
+  if (candidate && candidate.matchScore === 1) {
     return {
       ingredient: group.ingredient,
       candidateId: candidate.id,
@@ -251,7 +298,6 @@ export async function verifyNutritionCandidates(
   ].join("\n")
 
   try {
-    await waitForRateLimit(RateLimitType.Llm)
     const body: Record<string, unknown> = {
       model: config.llm.model,
       messages: [{ role: "user", content: prompt }],
@@ -260,16 +306,9 @@ export async function verifyNutritionCandidates(
     }
     if (config.llm.structuredOutputs) body.response_format = matchResponseFormat(pending)
 
-    const response = await fetch(endpointUrl(), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.llm.apiKey}`,
-      },
-      body: JSON.stringify(body),
-    })
-    if (!response.ok) {
-      logger.warn({ status: response.status }, "LLM candidate verification returned error")
+    const response = await fetchLlm(body, "matches")
+    if (!response?.ok) {
+      logger.warn({ status: response?.status }, "LLM candidate verification returned error")
       for (const group of pending) {
         decisions.set(group.ingredient, deterministicDecision(group))
       }
@@ -346,8 +385,6 @@ export async function estimateGrams(quantity: number, unitName: string, foodName
   const prompt = `Estimate only the typical weight in grams for exactly 1 ${unitName} of "${foodName}". For "item", use the typical edible weight of one whole item. Do not multiply by recipe quantity and do not calculate nutrition. Return 0 only when a reasonable estimate is impossible.`
 
   try {
-    await waitForRateLimit(RateLimitType.Llm)
-
     const body: Record<string, unknown> = {
       model: config.llm.model,
       messages: [{ role: "user", content: prompt }],
@@ -358,17 +395,10 @@ export async function estimateGrams(quantity: number, unitName: string, foodName
       body.response_format = weightResponseFormat
     }
 
-    const res = await fetch(endpointUrl(), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.llm.apiKey}`,
-      },
-      body: JSON.stringify(body),
-    })
+    const res = await fetchLlm(body, "weight")
 
-    if (!res.ok) {
-      logger.warn({ status: res.status, unitName, foodName }, "LLM API returned error")
+    if (!res?.ok) {
+      logger.warn({ status: res?.status, unitName, foodName }, "LLM API returned error")
       return null
     }
 
@@ -426,8 +456,6 @@ export async function estimateNutrients(foodName: string): Promise<NutrientSet |
   const prompt = `Estimate typical nutritional values per 100g for "${foodName}". Return kcal in kilocalories; protein, carbs, fat, saturatedFat, transFat, fiber, and sugar in grams; sodium and cholesterol in milligrams. Use 0 only when the typical amount is effectively zero.`
 
   try {
-    await waitForRateLimit(RateLimitType.Llm)
-
     const body: Record<string, unknown> = {
       model: config.llm.model,
       messages: [{ role: "user", content: prompt }],
@@ -438,17 +466,10 @@ export async function estimateNutrients(foodName: string): Promise<NutrientSet |
       body.response_format = nutrientResponseFormat
     }
 
-    const res = await fetch(endpointUrl(), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.llm.apiKey}`,
-      },
-      body: JSON.stringify(body),
-    })
+    const res = await fetchLlm(body, "nutrients")
 
-    if (!res.ok) {
-      logger.warn({ status: res.status, foodName }, "LLM nutrient API returned error")
+    if (!res?.ok) {
+      logger.warn({ status: res?.status, foodName }, "LLM nutrient API returned error")
       return null
     }
 

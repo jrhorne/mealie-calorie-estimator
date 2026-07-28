@@ -66,6 +66,9 @@ export const config = {
     weightMaxTokens: parseInt(process.env.LLM_WEIGHT_MAX_TOKENS || "64", 10),
     nutrientMaxTokens: parseInt(process.env.LLM_NUTRIENT_MAX_TOKENS || "256", 10),
     matchMaxTokens: parseInt(process.env.LLM_MATCH_MAX_TOKENS || "1024", 10),
+    timeoutMs: parseInt(process.env.LLM_TIMEOUT_MS || "60000", 10),
+    maxRetries: parseInt(process.env.LLM_MAX_RETRIES || "2", 10),
+    retryBackoffMs: parseInt(process.env.LLM_RETRY_BACKOFF_MS || "2000", 10),
   },
 
   estimate: {

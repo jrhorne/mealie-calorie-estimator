@@ -11,6 +11,7 @@
 * reject unrelated USDA and Open Food Facts composite-food matches
 * invalidate provider and LLM match caches when matching logic changes
 * keep all scaling, summation, serving division, and rounding in deterministic application code
+* retry transient LLM failures and fail closed on less-than-exact deterministic matches
 
 ## [1.9.0](https://github.com/timo-reymann/mealie-calorie-estimator/compare/v1.8.0...v1.9.0) (2026-07-26)
 
